@@ -35,13 +35,13 @@ The basic usage involves specifying the target directory and options when runnin
   Specify the directory to explore. If not specified, the current directory (`.`) is used.
 
 - `-e, --extensions <EXTENSIONS>`  
-  Provide a comma-separated list of allowed file extensions.  
-  (Example: `-e .txt,.md,.py`)  
+  Provide a comma-separated list of allowed file extensions. (Example: `-e .txt,.md,.py`)
+
   If left empty, the default list (`.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`) is used.
 
 - `-i, --ignore-extensions <EXTENSIONS>`  
-  Provide a comma-separated list of file extensions to ignore.  
-  (Example: `-i .lock,.md`)  
+  Provide a comma-separated list of file extensions to ignore. (Example: `-i .lock,.md`)
+
   The default value is:
 
   ```
@@ -52,17 +52,18 @@ The basic usage involves specifying the target directory and options when runnin
   Specify the output file name. The default is `summary.txt`.
 
 - `--max-size <MAX_SIZE>`  
-  Specify the maximum file size (in bytes) for reading file contents.  
-  The default is `10485760` (10MB).  
+  Specify the maximum file size (in bytes) for reading file contents. The default is `10485760` (10MB).
+
   ※ Files exceeding the specified size will have their content extraction skipped.
 
 - `-c, --clipboard`  
   Instead of writing the output to a file, copy the results to the clipboard.
 
 - `--ignore-dirs <DIRS>`  
-  Provide a comma-separated list of directory names to ignore.  
-  Example: `.git,node_modules,__pycache__,target`  
+  Provide a comma-separated list of directory names to ignore. (Example: `.git,node_modules,__pycache__,target`)
+
   The default value is:
+
   ```
   .git,.vscode,target,node_modules,__pycache__,.idea,build,dist
   ```
