@@ -69,7 +69,7 @@ The basic usage involves specifying the target directory and options when runnin
 
 # Command Examples
 
-## `summary.txt_example` was generated using the following command:
+- For example, `summary.txt_example` was generated using the following command:
 
 ```bash
 ./target/release/oreuit -d  . --ignore-dirs target,.git -i .lock,.md -e .toml,.rs
