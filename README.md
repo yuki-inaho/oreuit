@@ -60,7 +60,8 @@ The basic usage involves specifying the target directory and options when runnin
   Instead of writing the output to a file, copy the results to the clipboard.
 
 - `--ignore-dirs <DIRS>`  
-  Provide a comma-separated list of directory names to ignore. (Example: `.git,node_modules,__pycache__,target`)
+  Provide a comma-separated list of directory names to ignore.
+  (Example: `.git,node_modules,__pycache__,target`)
 
   The default value is:
 
