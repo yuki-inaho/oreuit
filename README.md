@@ -14,6 +14,11 @@
 1. **Clone the Repository or Download the Code**  
    Obtain the source code of this tool from GitHub or other sources.
 
+  ```bash
+  git clone git@github.com:yuki-inaho/uithub_like_text_generator.git
+  cd uithub_like_text_generator
+  ```
+
 2. **Build**  
    Execute the following command within the project directory to create a release build.
 
