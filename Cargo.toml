@@ -1,0 +1,12 @@
+[package]
+name = "oreuit"
+version = "0.1.0"
+edition = "2021"
+authors = ["Name"]
+rust-version = "1.70"
+
+[dependencies]
+clap = { version = "4.1", features = ["derive"] }
+walkdir = "2.3"
+encoding_rs = "0.8"
+arboard = "3.4.1"
