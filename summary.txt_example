@@ -1,11 +1,12 @@
-＜ディレクトリ構造＞
+＜Directory Structure＞
 
 .
 ├── src
 │   └── main.rs
+├── .gitignore
 └── Cargo.toml
 
-＜ファイル内容＞
+＜File Contents＞
 
 --------------------------------------------------------------------------------
 Cargo.toml:
@@ -36,23 +37,23 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// ディレクトリ構造とファイル内容をまとめるツール
+/// Tool to summarize directory structure and file contents
 #[derive(Parser, Debug)]
 #[clap(
     author,
     version,
-    about = "ディレクトリ構造とファイル内容をまとめるツール(uithub的なもの)"
+    about = "A tool to summarize directory structure and file contents (similar to uithub)"
 )]
 struct Args {
-    /// 探索対象のディレクトリ（デフォルトはカレントディレクトリ）
+    /// Directory to explore (default is the current directory)
     #[clap(short = 'd', long = "directory", default_value = ".")]
     directory: String,
 
-    /// 許可する拡張子（カンマ区切り、例: .txt,.md,.py）。空文字の場合は既定のリストを使用
+    /// Allowed file extensions (comma-separated, e.g., .txt,.md,.py). If empty, the default list is used
     #[clap(short = 'e', long = "extensions", default_value = "")]
     extensions: String,
 
-    /// 無視する拡張子（カンマ区切り、例: .bin,.zip,...）。空文字の場合は無視しない
+    /// File extensions to ignore (comma-separated, e.g., .bin,.zip,...). If empty, no extensions are ignored
     #[clap(
         short = 'i',
         long = "ignore-extensions",
@@ -60,19 +61,19 @@ struct Args {
     )]
     ignore_extensions: String,
 
-    /// 出力ファイル名（デフォルトは summary.txt）
+    /// Output file name (default is summary.txt)
     #[clap(short = 'o', long = "output", default_value = "summary.txt")]
     output: String,
 
-    /// 読み込み対象とするファイルの最大サイズ（バイト単位、デフォルトは 10485760 = 10MB）
+    /// Maximum file size to read (in bytes, default is 10485760 = 10MB)
     #[clap(long = "max-size", default_value = "10485760")]
     max_size: u64,
 
-    /// 出力をファイルではなく、クリップボードにコピーする
+    /// Copy output to clipboard instead of writing to a file
     #[clap(short = 'c', long = "clipboard")]
     clipboard: bool,
 
-    /// 無視するディレクトリ名（カンマ区切り、例: .git,node_modules,__pycache__ など）
+    /// Directory names to ignore (comma-separated, e.g., .git,node_modules,__pycache__, etc.)
     #[clap(
         long = "ignore-dirs",
         default_value = ".git,.vscode,target,node_modules,__pycache__,.idea,build,dist"
@@ -80,7 +81,7 @@ struct Args {
     ignore_dirs: String,
 }
 
-/// ファイル先頭の1024バイトにNULバイトが含まれていればバイナリファイルと判定する
+/// Determines if a file is binary by checking for NUL bytes in the first 1024 bytes
 fn is_binary(file_path: &Path) -> bool {
     if let Ok(mut file) = fs::File::open(file_path) {
         let mut buffer = [0u8; 1024];
@@ -91,8 +92,8 @@ fn is_binary(file_path: &Path) -> bool {
     true
 }
 
-/// UTF-8での読み込みを試み、失敗した場合はSHIFT_JISでデコードを試みる。
-/// 両方失敗した場合は "[Cannot decode file content]" を返す。
+/// Attempts to read a file as UTF-8, and if it fails, tries to decode using SHIFT_JIS.
+/// If both attempts fail, returns "[Cannot decode file content]".
 fn read_file_contents(file_path: &Path) -> String {
     match fs::read_to_string(file_path) {
         Ok(text) => text,
@@ -110,17 +111,17 @@ fn read_file_contents(file_path: &Path) -> String {
     }
 }
 
-/// 指定ディレクトリ以下を再帰的に探索し、
-/// ・許可拡張子（allowed）に一致し、
-/// ・かつ無視拡張子（ignore）に含まれないファイルをリストアップする。
-/// また、無視するディレクトリ（ignore_dirs）内のファイルは探索しない。
+/// Recursively searches the specified directory and lists files that
+/// - Match allowed extensions
+/// - Do not have ignored extensions
+/// Files within ignored directories are not searched.
 fn collect_files(
     directory: &Path,
     allowed: &HashSet<String>,
     ignore: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
 ) -> Vec<PathBuf> {
-    // WalkDir の filter_entry を用いて、無視するディレクトリは探索対象外にする
+    // Use WalkDir's filter_entry to exclude ignored directories from the search
     let walker = WalkDir::new(directory).into_iter().filter_entry(|e| {
         if e.file_type().is_dir() {
             if let Some(name) = e.file_name().to_str() {
@@ -136,7 +137,7 @@ fn collect_files(
             let path = entry.path();
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 let ext_formatted = format!(".{}", ext.to_lowercase());
-                // 拡張子フィルターのチェック
+                // Check file extension filters
                 if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
                     continue;
                 }
@@ -147,7 +148,7 @@ fn collect_files(
             }
         }
     }
-    // ファイルパスを相対パス順にソートする
+    // Sort file paths in relative path order
     files.sort_by(|a, b| {
         a.strip_prefix(directory)
             .unwrap_or(a)
@@ -156,8 +157,8 @@ fn collect_files(
     files
 }
 
-/// 指定ディレクトリのツリー形式の構造を生成する。
-/// allowed, ignore のフィルターを適用し、ignore_dirs に含まれるディレクトリは除外する。
+/// Generates a tree structure of the specified directory.
+/// Applies allowed and ignore filters, and excludes directories in ignore_dirs.
 fn build_tree(
     directory: &Path,
     allowed: &HashSet<String>,
@@ -173,7 +174,7 @@ fn build_tree(
     lines.join("\n")
 }
 
-/// 再帰的にディレクトリ構造を走査し、ツリー形式の文字列を生成する補助関数
+/// Helper function that recursively traverses the directory structure and builds the tree string
 fn build_tree_helper(
     path: &Path,
     prefix: &str,
@@ -182,28 +183,28 @@ fn build_tree_helper(
     ignore_dirs: &HashSet<String>,
     lines: &mut Vec<String>,
 ) {
-    // ディレクトリ内のエントリを読み込み、名前でソートする
+    // Read entries in the directory and sort them by name
     let mut entries: Vec<fs::DirEntry> = match fs::read_dir(path) {
         Ok(iter) => iter.filter_map(|e| e.ok()).collect(),
         Err(_) => return,
     };
     entries.sort_by_key(|e| e.file_name());
 
-    // ディレクトリとファイルを分ける
+    // Separate directories and files
     let mut dirs = Vec::new();
     let mut files = Vec::new();
     for entry in entries {
         let entry_path = entry.path();
         let name = entry.file_name().into_string().unwrap_or_default();
 
-        // 無視するディレクトリの場合はスキップ
+        // Skip ignored directories
         if entry_path.is_dir() {
             if ignore_dirs.contains(&name) {
                 continue;
             }
             dirs.push(entry);
         } else if entry_path.is_file() {
-            // ファイルの場合、拡張子フィルターを適用
+            // Apply file extension filters
             if let Some(ext_os) = entry_path.extension() {
                 if let Some(ext) = ext_os.to_str() {
                     let ext_formatted = format!(".{}", ext.to_lowercase());
@@ -219,7 +220,7 @@ fn build_tree_helper(
         }
     }
 
-    // ディレクトリを先に表示し、その後にファイルを表示する
+    // Display directories first, then files
     let mut all_entries = Vec::new();
     for d in dirs {
         all_entries.push((d, true));
@@ -235,7 +236,7 @@ fn build_tree_helper(
         let name = entry.file_name().into_string().unwrap_or_default();
         lines.push(format!("{}{}{}", prefix, connector, name));
 
-        // ディレクトリの場合は再帰処理
+        // If it's a directory, recurse into it
         if is_dir {
             let new_prefix = if is_last {
                 format!("{}    ", prefix)
@@ -254,7 +255,8 @@ fn build_tree_helper(
     }
 }
 
-/// ツリー形式のディレクトリ構造と、各ファイルの相対パスおよび内容（またはスキップメッセージ）を連結したテキストを生成する
+/// Generates text that combines the tree structure of the directory and
+/// the relative paths and contents (or skip messages) of each file.
 fn generate_output_text(
     directory: &Path,
     allowed: &HashSet<String>,
@@ -262,9 +264,9 @@ fn generate_output_text(
     ignore_dirs: &HashSet<String>,
     max_size: u64,
 ) -> String {
-    // ツリー形式のディレクトリ構造を生成
+    // Generate the tree structure of the directory
     let tree_text = build_tree(directory, allowed, ignore, ignore_dirs);
-    // 対象ファイルの内容を取得
+    // Retrieve contents of target files
     let files = collect_files(directory, allowed, ignore, ignore_dirs);
     let mut file_contents = String::new();
     for file in files {
@@ -289,7 +291,7 @@ fn generate_output_text(
         file_contents.push_str("\n\n");
     }
     format!(
-        "＜ディレクトリ構造＞\n\n{}\n\n＜ファイル内容＞\n\n{}",
+        "＜Directory Structure＞\n\n{}\n\n＜File Contents＞\n\n{}",
         tree_text, file_contents
     )
 }
@@ -298,15 +300,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let dir = Path::new(&args.directory);
 
-    // 既定の許可拡張子リスト（extensions 未指定の場合に使用）
+    // Default list of allowed file extensions (used when extensions are not specified)
     let default_allowed: HashSet<String> = [
-        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs"
+        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect();
 
-    // 許可する拡張子の設定（入力値が空なら既定リストを採用）
+    // Configure allowed file extensions (use default list if input is empty)
     let allowed: HashSet<String> = if args.extensions.trim().is_empty() {
         default_allowed
     } else {
@@ -325,7 +327,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .collect()
     };
 
-    // 無視する拡張子の設定
+    // Configure ignored file extensions
     let ignore: HashSet<String> = args
         .ignore_extensions
         .split(',')
@@ -341,7 +343,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
-    // 無視するディレクトリ名の設定
+    // Configure ignored directory names
     let ignore_dirs: HashSet<String> = args
         .ignore_dirs
         .split(',')
@@ -355,23 +357,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
-    // 出力テキストの生成
+    // Generate the output text
     let output_text = generate_output_text(dir, &allowed, &ignore, &ignore_dirs, args.max_size);
 
-    // クリップボードに出力する場合は arboard クレートを利用
+    // If copying to clipboard, use the arboard crate
     if args.clipboard {
         match arboard::Clipboard::new() {
             Ok(mut clipboard) => {
                 clipboard.set_text(output_text)?;
-                println!("出力内容をクリップボードにコピーしました。");
+                println!("Output content has been copied to the clipboard.");
             }
             Err(e) => {
-                eprintln!("クリップボード操作に失敗しました: {}", e);
+                eprintln!("Failed to access the clipboard: {}", e);
             }
         }
     } else {
         fs::write(&args.output, output_text)?;
-        println!("出力完了: {}", args.output);
+        println!("Output completed: {}", args.output);
     }
     Ok(())
 }
