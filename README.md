@@ -73,7 +73,7 @@ The basic usage involves specifying the target directory and options when runnin
 
   ※ Files exceeding the specified size will have their content extraction skipped.
 
-# Command Examples
+# Command and Result Examples
 
 - For example, `summary.txt_example` was generated using the following command:
 
