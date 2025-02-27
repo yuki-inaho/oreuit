@@ -11,7 +11,7 @@
 
 ## Installation Steps
 
-1. **Clone the Repository or Download the Code**  
+1. **Clone the Repository or Download the Code**
    Obtain the source code of this tool from GitHub or other sources.
 
    ```bash
@@ -19,15 +19,15 @@
    cd uithub_like_text_generator
    ```
 
-2. **Build**  
+2. **Build**
    Execute the following command within the project directory to create a release build.
 
    ```bash
    cargo build --release
    ```
 
-3. **Place the Executable**  
-   After the build completes, the executable will be generated at `./target/release/oreuit`.  
+3. **Place the Executable**
+   After the build completes, the executable will be generated at `./target/release/oreuit`.
    Add it to your system's PATH or specify the execution path as needed.
 
 # Usage
