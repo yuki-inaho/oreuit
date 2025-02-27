@@ -36,48 +36,52 @@ The basic usage involves specifying the target directory and options when runnin
 
 ## Available Options
 
-- `-d, --directory <DIRECTORY>`  
+- `-d, --directory <DIRECTORY>`
   Specify the directory to explore. If not specified, the current directory (`.`) is used.
 
-- `-e, --extensions <EXTENSIONS>`  
+- `-e, --extensions <EXTENSIONS>`
   Provide a comma-separated list of allowed file extensions. (Example: `-e .txt,.md,.py`)
-
   If left empty, the default list (`.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`) is used.
 
-- `-i, --ignore-extensions <EXTENSIONS>`  
+- `-i, --ignore-extensions <EXTENSIONS>`
   Provide a comma-separated list of file extensions to ignore. (Example: `-i .lock,.md`)
-
   The default value is:
 
   ```
   .bin,.zip,.tar,.gz,.7z,.rar,.exe,.dll,.so,.dylib,.a,.lib,.obj,.o,.class,.jar,.war,.ear,.ipynb,.jpg,.jpeg,.png,.gif
   ```
 
-- `-o, --output <OUTPUT>`  
+- `-o, --output <OUTPUT>`
   Specify the output file name. The default is `summary.txt`.
 
-- `-c, --clipboard`  
+- `-c, --clipboard`
   Instead of writing the output to a file, copy the results to the clipboard.
 
-- `--ignore-dirs <DIRS>`  
+- `--ignore-dirs <DIRS>`
   Provide a comma-separated list of directory names to ignore.
   (Example: `.git,node_modules,__pycache__,target`)
-
   The default value is:
 
   ```
   .git,.vscode,target,node_modules,__pycache__,.idea,build,dist
   ```
 
-- `--max-size <MAX_SIZE>`  
+- `--max-size <MAX_SIZE>`
   Specify the maximum file size (in bytes) for reading file contents. The default is `10485760` (10MB).
-
   ※ Files exceeding the specified size will have their content extraction skipped.
 
-# Command and Output Examples
+- `-w, --whitelist-filenames <FILENAMES>`
+  Specify a comma-separated list of filenames that are always included, regardless of their file extension or directory.
+  This is particularly useful for forcing the output of files without an extension (e.g., `Dockerfile`, `Makefile`) even when they do not match the allowed file extensions or appear in directories normally ignored.
 
-- For example, `summary.txt_example` was generated using the following command:
+---
+
+## Command and Output Examples
+
+For example, to force the inclusion of files named `Dockerfile` and `Makefile` regardless of their extension, you can run:
 
 ```bash
-./target/release/oreuit -d  . --ignore-dirs target,.git -i .lock,.md -e .toml,.rs -o summary.txt_example
-```
+./target/release/oreuit --directory . --ignore-dirs ".git,target" -o summary.txt_example
+````
+
+This command will include the specified whitelisted filenames from any directory in addition to applying the standard allowed and ignore rules.

@@ -49,6 +49,10 @@ struct Args {
         default_value = ".git,.vscode,target,node_modules,__pycache__,.idea,build,dist"
     )]
     ignore_dirs: String,
+
+    /// Filenames to whitelist (comma-separated, e.g., Dockerfile,Makefile). These are always included.
+    #[clap(short = 'w', long = "whitelist-filenames", default_value = "")]
+    whitelist_filenames: String,
 }
 
 /// Determines if a file is binary by checking for NUL bytes in the first 1024 bytes
@@ -84,12 +88,14 @@ fn read_file_contents(file_path: &Path) -> String {
 /// Recursively searches the specified directory and lists files that
 /// - Match allowed extensions
 /// - Do not have ignored extensions
+/// - Are in the whitelist_filenames (if any)
 /// Files within ignored directories are not searched.
 fn collect_files(
     directory: &Path,
     allowed: &HashSet<String>,
     ignore: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
+    whitelist_filenames: &HashSet<String>,
 ) -> Vec<PathBuf> {
     // Use WalkDir's filter_entry to exclude ignored directories from the search
     let walker = WalkDir::new(directory).into_iter().filter_entry(|e| {
@@ -105,19 +111,34 @@ fn collect_files(
     for entry in walker.filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             let path = entry.path();
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                let ext_formatted = format!(".{}", ext.to_lowercase());
-                // Check file extension filters
-                if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
-                    continue;
+            let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+            let is_whitelisted = whitelist_filenames.contains(file_name);
+
+            // ホワイトリストに該当しない場合のみ、拡張子によるフィルタを適用
+            if !is_whitelisted {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    let ext_formatted = format!(".{}", ext.to_lowercase());
+                    // Check file extension filters
+                    if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
+                        continue;
+                    }
+                    if ignore.contains(&ext_formatted) {
+                        continue;
+                    }
+                } else {
+                    // 拡張子がない場合、allowed が空でないならスキップされるが
+                    // ファイル名もホワイトリストに無いなら対象外にして問題なければこのまま
+                    if !allowed.is_empty() {
+                        // 拡張子がなく、allowed が指定されているのに
+                        // ホワイトリストでもないならスキップ
+                        continue;
+                    }
                 }
-                if ignore.contains(&ext_formatted) {
-                    continue;
-                }
-                files.push(path.to_path_buf());
             }
+            files.push(path.to_path_buf());
         }
     }
+
     // Sort file paths in relative path order
     files.sort_by(|a, b| {
         a.strip_prefix(directory)
@@ -129,18 +150,28 @@ fn collect_files(
 
 /// Generates a tree structure of the specified directory.
 /// Applies allowed and ignore filters, and excludes directories in ignore_dirs.
+/// Also forces whitelisted filenames to appear.
 fn build_tree(
     directory: &Path,
     allowed: &HashSet<String>,
     ignore: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
+    whitelist_filenames: &HashSet<String>,
 ) -> String {
     let base = directory
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or(".");
     let mut lines = vec![base.to_string()];
-    build_tree_helper(directory, "", allowed, ignore, ignore_dirs, &mut lines);
+    build_tree_helper(
+        directory,
+        "",
+        allowed,
+        ignore,
+        ignore_dirs,
+        whitelist_filenames,
+        &mut lines,
+    );
     lines.join("\n")
 }
 
@@ -151,6 +182,7 @@ fn build_tree_helper(
     allowed: &HashSet<String>,
     ignore: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
+    whitelist_filenames: &HashSet<String>,
     lines: &mut Vec<String>,
 ) {
     // Read entries in the directory and sort them by name
@@ -174,14 +206,22 @@ fn build_tree_helper(
             }
             dirs.push(entry);
         } else if entry_path.is_file() {
-            // Apply file extension filters
-            if let Some(ext_os) = entry_path.extension() {
-                if let Some(ext) = ext_os.to_str() {
-                    let ext_formatted = format!(".{}", ext.to_lowercase());
-                    if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
-                        continue;
+            let is_whitelisted = whitelist_filenames.contains(&name);
+            if !is_whitelisted {
+                // Apply file extension filters
+                if let Some(ext_os) = entry_path.extension() {
+                    if let Some(ext) = ext_os.to_str() {
+                        let ext_formatted = format!(".{}", ext.to_lowercase());
+                        if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
+                            continue;
+                        }
+                        if ignore.contains(&ext_formatted) {
+                            continue;
+                        }
                     }
-                    if ignore.contains(&ext_formatted) {
+                } else {
+                    // 拡張子がない場合
+                    if !allowed.is_empty() {
                         continue;
                     }
                 }
@@ -219,6 +259,7 @@ fn build_tree_helper(
                 allowed,
                 ignore,
                 ignore_dirs,
+                whitelist_filenames,
                 lines,
             );
         }
@@ -232,12 +273,27 @@ fn generate_output_text(
     allowed: &HashSet<String>,
     ignore: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
+    whitelist_filenames: &HashSet<String>,
     max_size: u64,
 ) -> String {
     // Generate the tree structure of the directory
-    let tree_text = build_tree(directory, allowed, ignore, ignore_dirs);
+    let tree_text = build_tree(
+        directory,
+        allowed,
+        ignore,
+        ignore_dirs,
+        whitelist_filenames,
+    );
+
     // Retrieve contents of target files
-    let files = collect_files(directory, allowed, ignore, ignore_dirs);
+    let files = collect_files(
+        directory,
+        allowed,
+        ignore,
+        ignore_dirs,
+        whitelist_filenames,
+    );
+
     let mut file_contents = String::new();
     for file in files {
         let relative_path = file
@@ -260,6 +316,7 @@ fn generate_output_text(
         file_contents.push_str(&content);
         file_contents.push_str("\n\n");
     }
+
     format!(
         "＜Directory Structure＞\n\n{}\n\n＜File Contents＞\n\n{}",
         tree_text, file_contents
@@ -327,8 +384,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
+    // whitelist_filenames をパースして HashSet に格納
+    let whitelist_filenames: HashSet<String> = args
+        .whitelist_filenames
+        .split(',')
+        .filter_map(|s| {
+            let s = s.trim().to_string();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
+        })
+        .collect();
+
     // Generate the output text
-    let output_text = generate_output_text(dir, &allowed, &ignore, &ignore_dirs, args.max_size);
+    let output_text = generate_output_text(
+        dir,
+        &allowed,
+        &ignore,
+        &ignore_dirs,
+        &whitelist_filenames,
+        args.max_size,
+    );
 
     // If copying to clipboard, use the arboard crate
     if args.clipboard {
