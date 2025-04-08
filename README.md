@@ -60,6 +60,7 @@ The basic usage involves specifying the target directory/directories and options
 
 -   `-c, --clipboard`
     Instead of writing the output to a file, copy the results to the clipboard.
+
     **Note:** Requires the tool to be built with the `clipboard` feature enabled (see Installation section).
 
 -   `--ignore-dirs <DIRS>`
