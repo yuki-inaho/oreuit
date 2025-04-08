@@ -15,9 +15,9 @@ use walkdir::WalkDir;
     about = "A tool to summarize directory structure and file contents (similar to uithub)"
 )]
 struct Args {
-    /// Directory to explore (default is the current directory)
+    /// Directories to explore (comma-separated, default is the current directory)
     #[clap(short = 'd', long = "directory", default_value = ".")]
-    directory: String,
+    directories: String,
 
     /// Allowed file extensions (comma-separated, e.g., .txt,.md,.py). If empty, the default list is used
     #[clap(short = 'e', long = "extensions", default_value = "")]
@@ -97,7 +97,6 @@ fn collect_files(
     ignore_dirs: &HashSet<String>,
     whitelist_filenames: &HashSet<String>,
 ) -> Vec<PathBuf> {
-    // Use WalkDir's filter_entry to exclude ignored directories from the search
     let walker = WalkDir::new(directory).into_iter().filter_entry(|e| {
         if e.file_type().is_dir() {
             if let Some(name) = e.file_name().to_str() {
@@ -114,11 +113,9 @@ fn collect_files(
             let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
             let is_whitelisted = whitelist_filenames.contains(file_name);
 
-            // ホワイトリストに該当しない場合のみ、拡張子によるフィルタを適用
             if !is_whitelisted {
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     let ext_formatted = format!(".{}", ext.to_lowercase());
-                    // Check file extension filters
                     if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
                         continue;
                     }
@@ -126,11 +123,7 @@ fn collect_files(
                         continue;
                     }
                 } else {
-                    // 拡張子がない場合、allowed が空でないならスキップされるが
-                    // ファイル名もホワイトリストに無いなら対象外にして問題なければこのまま
-                    if !allowed.is_empty() {
-                        // 拡張子がなく、allowed が指定されているのに
-                        // ホワイトリストでもないならスキップ
+                     if !allowed.is_empty() {
                         continue;
                     }
                 }
@@ -139,7 +132,6 @@ fn collect_files(
         }
     }
 
-    // Sort file paths in relative path order
     files.sort_by(|a, b| {
         a.strip_prefix(directory)
             .unwrap_or(a)
@@ -149,8 +141,6 @@ fn collect_files(
 }
 
 /// Generates a tree structure of the specified directory.
-/// Applies allowed and ignore filters, and excludes directories in ignore_dirs.
-/// Also forces whitelisted filenames to appear.
 fn build_tree(
     directory: &Path,
     allowed: &HashSet<String>,
@@ -158,11 +148,12 @@ fn build_tree(
     ignore_dirs: &HashSet<String>,
     whitelist_filenames: &HashSet<String>,
 ) -> String {
-    let base = directory
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(".");
-    let mut lines = vec![base.to_string()];
+    // エラー (E0716) 修正箇所 1: String を取得してライフタイム問題を解決
+    let base_name = match directory.file_name().and_then(|s| s.to_str()) {
+        Some(s) => s.to_string(),
+        None => directory.to_string_lossy().into_owned(), // .into_owned() で String に変換
+    };
+    let mut lines = vec![base_name]; // String を vec に移動
     build_tree_helper(
         directory,
         "",
@@ -183,23 +174,20 @@ fn build_tree_helper(
     ignore: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
     whitelist_filenames: &HashSet<String>,
-    lines: &mut Vec<String>,
+    lines: &mut Vec<String>, // String を受け取るように変更
 ) {
-    // Read entries in the directory and sort them by name
     let mut entries: Vec<fs::DirEntry> = match fs::read_dir(path) {
         Ok(iter) => iter.filter_map(|e| e.ok()).collect(),
         Err(_) => return,
     };
     entries.sort_by_key(|e| e.file_name());
 
-    // Separate directories and files
     let mut dirs = Vec::new();
     let mut files = Vec::new();
     for entry in entries {
         let entry_path = entry.path();
         let name = entry.file_name().into_string().unwrap_or_default();
 
-        // Skip ignored directories
         if entry_path.is_dir() {
             if ignore_dirs.contains(&name) {
                 continue;
@@ -208,8 +196,7 @@ fn build_tree_helper(
         } else if entry_path.is_file() {
             let is_whitelisted = whitelist_filenames.contains(&name);
             if !is_whitelisted {
-                // Apply file extension filters
-                if let Some(ext_os) = entry_path.extension() {
+                 if let Some(ext_os) = entry_path.extension() {
                     if let Some(ext) = ext_os.to_str() {
                         let ext_formatted = format!(".{}", ext.to_lowercase());
                         if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
@@ -220,8 +207,7 @@ fn build_tree_helper(
                         }
                     }
                 } else {
-                    // 拡張子がない場合
-                    if !allowed.is_empty() {
+                     if !allowed.is_empty() {
                         continue;
                     }
                 }
@@ -230,7 +216,6 @@ fn build_tree_helper(
         }
     }
 
-    // Display directories first, then files
     let mut all_entries = Vec::new();
     for d in dirs {
         all_entries.push((d, true));
@@ -246,7 +231,6 @@ fn build_tree_helper(
         let name = entry.file_name().into_string().unwrap_or_default();
         lines.push(format!("{}{}{}", prefix, connector, name));
 
-        // If it's a directory, recurse into it
         if is_dir {
             let new_prefix = if is_last {
                 format!("{}    ", prefix)
@@ -266,68 +250,37 @@ fn build_tree_helper(
     }
 }
 
-/// Generates text that combines the tree structure of the directory and
-/// the relative paths and contents (or skip messages) of each file.
-fn generate_output_text(
-    directory: &Path,
-    allowed: &HashSet<String>,
-    ignore: &HashSet<String>,
-    ignore_dirs: &HashSet<String>,
-    whitelist_filenames: &HashSet<String>,
-    max_size: u64,
-) -> String {
-    // Generate the tree structure of the directory
-    let tree_text = build_tree(
-        directory,
-        allowed,
-        ignore,
-        ignore_dirs,
-        whitelist_filenames,
-    );
-
-    // Retrieve contents of target files
-    let files = collect_files(
-        directory,
-        allowed,
-        ignore,
-        ignore_dirs,
-        whitelist_filenames,
-    );
-
-    let mut file_contents = String::new();
-    for file in files {
-        let relative_path = file
-            .strip_prefix(directory)
-            .unwrap_or(&file)
-            .to_string_lossy();
-        let header = format!(
-            "--------------------------------------------------------------------------------\n{}:\n--------------------------------------------------------------------------------\n",
-            relative_path
-        );
-        let size = fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
-        let content = if size > max_size {
-            "[File size exceeds limit; skipped]\n".to_string()
-        } else if is_binary(&file) {
-            "[Binary file skipped]\n".to_string()
-        } else {
-            read_file_contents(&file)
-        };
-        file_contents.push_str(&header);
-        file_contents.push_str(&content);
-        file_contents.push_str("\n\n");
-    }
-
-    format!(
-        "＜Directory Structure＞\n\n{}\n\n＜File Contents＞\n\n{}",
-        tree_text, file_contents
-    )
-}
-
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-    let dir = Path::new(&args.directory);
 
-    // Default list of allowed file extensions (used when extensions are not specified)
+    let directories: Vec<PathBuf> = args.directories
+        .split(',')
+        .filter_map(|s| {
+            let s = s.trim();
+            if s.is_empty() {
+                None
+            } else {
+                let path = PathBuf::from(s);
+                 if !path.exists() {
+                    eprintln!("Warning: Directory not found, skipping: {}", path.display());
+                    None
+                } else if !path.is_dir() {
+                     eprintln!("Warning: Path is not a directory, skipping: {}", path.display());
+                     None
+                }
+                else {
+                    Some(path)
+                }
+            }
+        })
+        .collect();
+
+    if directories.is_empty() {
+        eprintln!("Error: No valid directories specified or found.");
+        return Ok(());
+    }
+
+
     let default_allowed: HashSet<String> = [
         ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp",
     ]
@@ -335,7 +288,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     .map(|s| s.to_string())
     .collect();
 
-    // Configure allowed file extensions (use default list if input is empty)
     let allowed: HashSet<String> = if args.extensions.trim().is_empty() {
         default_allowed
     } else {
@@ -354,7 +306,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             .collect()
     };
 
-    // Configure ignored file extensions
     let ignore: HashSet<String> = args
         .ignore_extensions
         .split(',')
@@ -370,7 +321,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
-    // Configure ignored directory names
     let ignore_dirs: HashSet<String> = args
         .ignore_dirs
         .split(',')
@@ -384,7 +334,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
-    // whitelist_filenames をパースして HashSet に格納
     let whitelist_filenames: HashSet<String> = args
         .whitelist_filenames
         .split(',')
@@ -398,27 +347,98 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
-    // Generate the output text
-    let output_text = generate_output_text(
-        dir,
-        &allowed,
-        &ignore,
-        &ignore_dirs,
-        &whitelist_filenames,
-        args.max_size,
+
+    let mut all_tree_text = String::new();
+    let mut all_file_contents = String::new();
+
+    for dir in &directories {
+        // エラー (E0716) 修正箇所 2: String を取得してライフタイム問題を解決
+        let dir_name_for_header = match dir.file_name().and_then(|s| s.to_str()) {
+            Some(s) => s.to_string(),
+            None => dir.to_string_lossy().into_owned(), // .into_owned() で String に変換
+        };
+
+        let tree_text = build_tree(
+            dir,
+            &allowed,
+            &ignore,
+            &ignore_dirs,
+            &whitelist_filenames,
+        );
+
+        // format! に String を渡す（自動的に参照される）
+        all_tree_text.push_str(&format!("=== Tree for {} ===\n{}\n\n", dir_name_for_header, tree_text));
+
+
+        let files = collect_files(
+            dir,
+            &allowed,
+            &ignore,
+            &ignore_dirs,
+            &whitelist_filenames,
+        );
+
+
+        for file in files {
+            let relative_path = file
+                .strip_prefix(dir)
+                .unwrap_or(&file)
+                .to_string_lossy(); // format! 内で使われるだけなので Cow のままでも OK
+
+            // format! に String を渡す
+            let header = format!(
+                "--------------------------------------------------------------------------------\n{} (in {}):\n--------------------------------------------------------------------------------\n",
+                relative_path, dir_name_for_header // ここでも dir_name_for_header (String) を使用
+            );
+            let size = fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
+            let content = if size > args.max_size {
+                "[File size exceeds limit; skipped]\n".to_string()
+            } else if is_binary(&file) {
+                "[Binary file skipped]\n".to_string()
+            } else {
+                read_file_contents(&file)
+            };
+            all_file_contents.push_str(&header);
+            all_file_contents.push_str(&content);
+            all_file_contents.push_str("\n\n");
+        }
+    }
+
+    if !all_tree_text.is_empty() {
+         all_tree_text.pop();
+        all_tree_text.pop();
+    }
+     if !all_file_contents.is_empty() {
+         all_file_contents.pop();
+        all_file_contents.pop();
+    }
+
+
+    let output_text = format!(
+        "＜Directory Structure＞\n\n{}\n\n＜File Contents＞\n\n{}",
+        all_tree_text, all_file_contents
     );
 
-    // If copying to clipboard, use the arboard crate
+
     if args.clipboard {
-        match arboard::Clipboard::new() {
-            Ok(mut clipboard) => {
-                clipboard.set_text(output_text)?;
-                println!("Output content has been copied to the clipboard.");
-            }
-            Err(e) => {
-                eprintln!("Failed to access the clipboard: {}", e);
+         #[cfg(feature = "clipboard")]
+        {
+            // arboard は Cargo.toml で optional = true と features で設定されている前提
+            match arboard::Clipboard::new() {
+                Ok(mut clipboard) => {
+                    clipboard.set_text(output_text)?;
+                    println!("Output content has been copied to the clipboard.");
+                }
+                Err(e) => {
+                    eprintln!("Failed to access the clipboard: {}. Try writing to a file instead.", e);
+                 }
             }
         }
+        #[cfg(not(feature = "clipboard"))]
+        {
+              eprintln!("Clipboard feature is not enabled. Please compile with '--features clipboard' or use the -o option to write to a file.");
+         }
+
     } else {
         fs::write(&args.output, output_text)?;
         println!("Output completed: {}", args.output);

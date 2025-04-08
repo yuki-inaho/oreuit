@@ -9,4 +9,8 @@ rust-version = "1.70"
 clap = { version = "4.1", features = ["derive"] }
 walkdir = "2.3"
 encoding_rs = "0.8"
-arboard = "3.4.1"
+arboard = { version = "3.4.1", optional = true }
+
+[features]
+default = []
+clipboard = ["dep:arboard"]
