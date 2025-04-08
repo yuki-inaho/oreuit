@@ -42,7 +42,7 @@ The basic usage involves specifying the target directory/directories and options
 ## Available Options
 
 -   `-d, --directory <DIRECTORIES>`
-    Specify the director**y or directories (comma-separated)** to explore. If not specified, the current directory (`.`) is used. (Example: `-d src,tests`)
+    Specify the directory or directories (comma-separated) to explore. If not specified, the current directory (`.`) is used. (Example: `-d src,tests`)
 
 -   `-e, --extensions <EXTENSIONS>`
     Provide a comma-separated list of allowed file extensions. (Example: `-e .txt,.md,.py`)
