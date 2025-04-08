@@ -51,7 +51,7 @@ struct Args {
     ignore_dirs: String,
 
     /// Filenames to whitelist (comma-separated, e.g., Dockerfile,Makefile). These are always included.
-    #[clap(short = 'w', long = "whitelist-filenames", default_value = "")]
+    #[clap(short = 'w', long = "whitelist-filenames", default_value = "Dockerfile,Makefile")]
     whitelist_filenames: String,
 }
 
@@ -329,7 +329,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Default list of allowed file extensions (used when extensions are not specified)
     let default_allowed: HashSet<String> = [
-        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs",
+        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp",
     ]
     .iter()
     .map(|s| s.to_string())
