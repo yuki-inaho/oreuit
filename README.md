@@ -1,6 +1,6 @@
 # oreuit
 
-- **oreuit** is a tool that generates a text report summarizing the file structure and contents within specified director**ies**. Inspired by [uithub](https://uithub.com/).
+- **oreuit** is a tool that generates a text report summarizing the file structure and contents within specified directories. Inspired by [uithub](https://uithub.com/).
 - It allows visualization of directory trees and bulk viewing of file contents for codebases without repositories, such as those not hosted on GitHub.
 
 # Installation
