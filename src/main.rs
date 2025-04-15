@@ -282,7 +282,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 
     let default_allowed: HashSet<String> = [
-        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp",
+        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp", ".pyx", ".pyd"
     ]
     .iter()
     .map(|s| s.to_string())
