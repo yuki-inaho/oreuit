@@ -46,7 +46,7 @@ struct Args {
     /// Directory names to ignore (comma-separated, e.g., .git,node_modules,__pycache__, etc.)
     #[clap(
         long = "ignore-dirs",
-        default_value = ".git,.vscode,target,node_modules,__pycache__,.idea,build,dist"
+        default_value = ".git,.vscode,target,node_modules,__pycache__,.idea,build,dist,.ruff_cache"
     )]
     ignore_dirs: String,
 
