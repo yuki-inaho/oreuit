@@ -29,6 +29,7 @@
     # Build with clipboard support (if you need the -c option)
     # cargo build --release --features clipboard
     ```
+
     If you plan to use the `-c, --clipboard` option, uncomment and run the second build command.
 
 3.  **Place the Executable**
@@ -41,51 +42,63 @@ The basic usage involves specifying the target directory/directories and options
 
 ## Available Options
 
--   `-d, --directory <DIRECTORIES>`
-    Specify the directory or directories (comma-separated) to explore. If not specified, the current directory (`.`) is used. (Example: `-d src,tests`)
+- `-d, --directory <DIRECTORIES>`
+  Specify the directory or directories (comma-separated) to explore. If not specified, the current directory (`.`) is used. (Example: `-d src,tests`)
 
--   `-e, --extensions <EXTENSIONS>`
-    Provide a comma-separated list of allowed file extensions. (Example: `-e .txt,.md,.py`)
-    If left empty, the default list (`.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`, `.hpp`) is used.
+- `-e, --extensions <EXTENSIONS>`
+  Provide a comma-separated list of allowed file extensions.
 
--   `-i, --ignore-extensions <EXTENSIONS>`
-    Provide a comma-separated list of file extensions to ignore. (Example: `-i .lock,.md`)
-    The default value is:
-    ```
-    .bin,.zip,.tar,.gz,.7z,.rar,.exe,.dll,.so,.dylib,.a,.lib,.obj,.o,.class,.jar,.war,.ear,.ipynb,.jpg,.jpeg,.png,.gif
-    ```
+  - If the value starts with `+,`, the specified extensions are **added** to the default list. (Example: `-e +,.json,.vue` adds `.json` and `.vue` to the default list.)
+  - Otherwise, the specified list **overwrites** the default list. (Example: `-e .py,.js` uses only `.py` and `.js`.)
+  - If not specified, the default list is used.
+    **Default:** `.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`, `.hpp`, `.ts`, `.tsx`, `.d.ts`, `.jsx`, `.toml`
+    **Note:** `.json` is not included by default. To include it, use `-e +,.json`.
+    **Note:** Files without extensions (e.g., `.gitignore`, `Makefile`, `Dockerfile`, `LICENSE`, `README`, `.gitattributes`) are allowed by default unless explicitly ignored.
 
--   `-o, --output <OUTPUT>`
-    Specify the output file name. The default is `summary.txt`.
+- `-i, --ignore-extensions <EXTENSIONS>`
+  Provide a comma-separated list of file extensions to ignore. (Example: `-i .lock,.md`)
+  The default value is:
 
--   `-c, --clipboard`
-    Instead of writing the output to a file, copy the results to the clipboard.
+  ```
+  .bin,.zip,.tar,.gz,.7z,.rar,.exe,.dll,.so,.dylib,.a,.lib,.obj,.o,.class,.jar,.war,.ear,.ipynb,.jpg,.jpeg,.png,.gif
+  ```
 
-    **Note:** Requires the tool to be built with the `clipboard` feature enabled (see Installation section).
+- `-o, --output <OUTPUT>`
+  Specify the output file name. The default is `summary.txt`.
 
--   `--ignore-dirs <DIRS>`
-    Provide a comma-separated list of directory names to ignore.
-    (Example: `.git,node_modules,__pycache__,target`)
-    The default value is:
-    ```
-    .git,.vscode,target,node_modules,__pycache__,.idea,build,dist
-    ```
+- `-c, --clipboard`
+  Instead of writing the output to a file, copy the results to the clipboard.
 
--   `--max-size <MAX_SIZE>`
-    Specify the maximum file size (in bytes) for reading file contents. The default is `10485760` (10MB).
-    Files exceeding the specified size will have their content extraction skipped.
+  **Note:** Requires the tool to be built with the `clipboard` feature enabled (see Installation section).
 
--   `-w, --whitelist-filenames <FILENAMES>`
-    Specify a comma-separated list of filenames that are always included, regardless of their file extension or location. (Example: `Dockerfile,Makefile`)
+- `--ignore-dirs <DIRS>`
+  Provide a comma-separated list of directory names to ignore.
+
+  - If the value starts with `+,`, the specified directories are **added** to the default ignore list. (Example: `--ignore-dirs +,my_temp,build2` adds `my_temp` and `build2` to the default ignore list.)
+  - Otherwise, the specified list **overwrites** the default list.
+  - If not specified, the default list is used.
+    **Default:** `.git`, `.vscode`, `target`, `node_modules`, `__pycache__`, `.idea`, `build`, `dist`, `.ruff_cache`
+
+- `--max-size <MAX_SIZE>`
+  Specify the maximum file size (in bytes) for reading file contents. The default is `10485760` (10MB).
+  Files exceeding the specified size will have their content extraction skipped.
+
+- `-w, --whitelist-filenames <FILENAMES>`
+  Specify a comma-separated list of filenames that are always included, regardless of their file extension or location. (Example: `Dockerfile,Makefile`)
 
 ---
 
 ## Command and Output Examples
 
-Example command:
+Example commands:
 
 ```bash
-./target/release/oreuit -d src -o summary_src.txt --ignore-dirs ".git,target"
-```
+# Scan the current directory, ignoring temp and adding .json files
+./target/release/oreuit -d . --ignore-dirs +,temp -e +,.json -o summary.txt
 
-This command scans the src directory, ignores .git and target subdirectories, and writes the output to summary_src.txt.
+# Scan the src directory, using only .py and .js extensions
+./target/release/oreuit -d src -e .py,.js -o summary_src.txt
+
+# Scan the current directory, ignoring only the 'build' directory (overwrites default ignore list)
+./target/release/oreuit -d . --ignore-dirs build -o summary_build_only.txt
+```

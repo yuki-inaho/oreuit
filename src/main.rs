@@ -19,9 +19,11 @@ struct Args {
     #[clap(short = 'd', long = "directory", default_value = ".")]
     directories: String,
 
-    /// Allowed file extensions (comma-separated, e.g., .txt,.md,.py). If empty, the default list is used
-    #[clap(short = 'e', long = "extensions", default_value = "")]
-    extensions: String,
+    /// Allowed file extensions (comma-separated, e.g., .txt,.md,.py).
+    /// Prefix with '+,' to ADD to the default list (e.g., +,.json,.vue).
+    /// If not specified, the default list is used.
+    #[clap(short = 'e', long = "extensions")]
+    extensions: Option<String>,
 
     /// File extensions to ignore (comma-separated, e.g., .bin,.zip,...). If empty, no extensions are ignored
     #[clap(
@@ -44,14 +46,16 @@ struct Args {
     clipboard: bool,
 
     /// Directory names to ignore (comma-separated, e.g., .git,node_modules,__pycache__, etc.)
-    #[clap(
-        long = "ignore-dirs",
-        default_value = ".git,.vscode,target,node_modules,__pycache__,.idea,build,dist,.ruff_cache"
-    )]
-    ignore_dirs: String,
+    /// Prefix with '+,' to ADD to the default list (e.g., +,my_temp,build2).
+    #[clap(long = "ignore-dirs")]
+    ignore_dirs: Option<String>,
 
     /// Filenames to whitelist (comma-separated, e.g., Dockerfile,Makefile). These are always included.
-    #[clap(short = 'w', long = "whitelist-filenames", default_value = "Dockerfile,Makefile")]
+    #[clap(
+        short = 'w',
+        long = "whitelist-filenames",
+        default_value = "Dockerfile,Makefile"
+    )]
     whitelist_filenames: String,
 }
 
@@ -123,7 +127,17 @@ fn collect_files(
                         continue;
                     }
                 } else {
-                     if !allowed.is_empty() {
+                    // Allow filenames consisting only of alphanumeric characters and symbols (e.g., .gitignore, Makefile, LICENSE) even without an extension
+                    let fname = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+                    let allowed_no_ext = [
+                        "Makefile",
+                        "Dockerfile",
+                        "LICENSE",
+                        "README",
+                        ".gitignore",
+                        ".gitattributes",
+                    ];
+                    if !allowed.is_empty() && !allowed_no_ext.contains(&fname) {
                         continue;
                     }
                 }
@@ -148,12 +162,11 @@ fn build_tree(
     ignore_dirs: &HashSet<String>,
     whitelist_filenames: &HashSet<String>,
 ) -> String {
-    // エラー (E0716) 修正箇所 1: String を取得してライフタイム問題を解決
     let base_name = match directory.file_name().and_then(|s| s.to_str()) {
         Some(s) => s.to_string(),
-        None => directory.to_string_lossy().into_owned(), // .into_owned() で String に変換
+        None => directory.to_string_lossy().into_owned(), // Convert to String using .into_owned()
     };
-    let mut lines = vec![base_name]; // String を vec に移動
+    let mut lines = vec![base_name];
     build_tree_helper(
         directory,
         "",
@@ -174,7 +187,7 @@ fn build_tree_helper(
     ignore: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
     whitelist_filenames: &HashSet<String>,
-    lines: &mut Vec<String>, // String を受け取るように変更
+    lines: &mut Vec<String>,
 ) {
     let mut entries: Vec<fs::DirEntry> = match fs::read_dir(path) {
         Ok(iter) => iter.filter_map(|e| e.ok()).collect(),
@@ -196,7 +209,7 @@ fn build_tree_helper(
         } else if entry_path.is_file() {
             let is_whitelisted = whitelist_filenames.contains(&name);
             if !is_whitelisted {
-                 if let Some(ext_os) = entry_path.extension() {
+                if let Some(ext_os) = entry_path.extension() {
                     if let Some(ext) = ext_os.to_str() {
                         let ext_formatted = format!(".{}", ext.to_lowercase());
                         if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
@@ -207,7 +220,20 @@ fn build_tree_helper(
                         }
                     }
                 } else {
-                     if !allowed.is_empty() {
+                    // Allow filenames consisting only of alphanumeric characters and symbols (e.g., .gitignore, Makefile, LICENSE) even without an extension
+                    let fname = entry_path
+                        .file_name()
+                        .and_then(|f| f.to_str())
+                        .unwrap_or("");
+                    let allowed_no_ext = [
+                        "Makefile",
+                        "Dockerfile",
+                        "LICENSE",
+                        "README",
+                        ".gitignore",
+                        ".gitattributes",
+                    ];
+                    if !allowed.is_empty() && !allowed_no_ext.contains(&fname) {
                         continue;
                     }
                 }
@@ -253,7 +279,8 @@ fn build_tree_helper(
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    let directories: Vec<PathBuf> = args.directories
+    let directories: Vec<PathBuf> = args
+        .directories
         .split(',')
         .filter_map(|s| {
             let s = s.trim();
@@ -261,14 +288,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 None
             } else {
                 let path = PathBuf::from(s);
-                 if !path.exists() {
+                if !path.exists() {
                     eprintln!("Warning: Directory not found, skipping: {}", path.display());
                     None
                 } else if !path.is_dir() {
-                     eprintln!("Warning: Path is not a directory, skipping: {}", path.display());
-                     None
-                }
-                else {
+                    eprintln!(
+                        "Warning: Path is not a directory, skipping: {}",
+                        path.display()
+                    );
+                    None
+                } else {
                     Some(path)
                 }
             }
@@ -280,30 +309,49 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-
     let default_allowed: HashSet<String> = [
-        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp", ".pyx", ".pyd"
+        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp",
+        ".ts", ".tsx", ".d.ts", ".jsx", ".toml",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect();
 
-    let allowed: HashSet<String> = if args.extensions.trim().is_empty() {
-        default_allowed
-    } else {
-        args.extensions
-            .split(',')
-            .filter_map(|s| {
-                let s = s.trim().to_lowercase();
-                if s.is_empty() {
-                    None
-                } else if s.starts_with('.') {
-                    Some(s)
-                } else {
-                    Some(format!(".{}", s))
+    let allowed: HashSet<String> = match &args.extensions {
+        None => default_allowed.clone(),
+        Some(val) => {
+            let val = val.trim();
+            if val.is_empty() {
+                default_allowed.clone()
+            } else if val.starts_with("+,") {
+                let mut set = default_allowed.clone();
+                for s in val.trim_start_matches("+,").split(',') {
+                    let s = s.trim().to_lowercase();
+                    if s.is_empty() {
+                        continue;
+                    }
+                    if s.starts_with('.') {
+                        set.insert(s);
+                    } else {
+                        set.insert(format!(".{}", s));
+                    }
                 }
-            })
-            .collect()
+                set
+            } else {
+                val.split(',')
+                    .filter_map(|s| {
+                        let s = s.trim().to_lowercase();
+                        if s.is_empty() {
+                            None
+                        } else if s.starts_with('.') {
+                            Some(s)
+                        } else {
+                            Some(format!(".{}", s))
+                        }
+                    })
+                    .collect()
+            }
+        }
     };
 
     let ignore: HashSet<String> = args
@@ -321,18 +369,51 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
-    let ignore_dirs: HashSet<String> = args
-        .ignore_dirs
-        .split(',')
-        .filter_map(|s| {
-            let s = s.trim().to_string();
-            if s.is_empty() {
-                None
+    let default_ignore_dirs: HashSet<String> = [
+        ".git",
+        ".vscode",
+        "target",
+        "node_modules",
+        "__pycache__",
+        ".idea",
+        "build",
+        "dist",
+        ".ruff_cache",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+
+    let ignore_dirs: HashSet<String> = match &args.ignore_dirs {
+        None => default_ignore_dirs.clone(),
+        Some(val) => {
+            let val = val.trim();
+            if val.is_empty() {
+                default_ignore_dirs.clone()
+            } else if val.starts_with("+,") {
+                let mut set = default_ignore_dirs.clone();
+                for s in val.trim_start_matches("+,").split(',') {
+                    let s = s.trim().to_string();
+                    if s.is_empty() {
+                        continue;
+                    }
+                    set.insert(s);
+                }
+                set
             } else {
-                Some(s)
+                val.split(',')
+                    .filter_map(|s| {
+                        let s = s.trim().to_string();
+                        if s.is_empty() {
+                            None
+                        } else {
+                            Some(s)
+                        }
+                    })
+                    .collect()
             }
-        })
-        .collect();
+        }
+    };
 
     let whitelist_filenames: HashSet<String> = args
         .whitelist_filenames
@@ -347,48 +428,32 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
-
     let mut all_tree_text = String::new();
     let mut all_file_contents = String::new();
 
     for dir in &directories {
-        // エラー (E0716) 修正箇所 2: String を取得してライフタイム問題を解決
         let dir_name_for_header = match dir.file_name().and_then(|s| s.to_str()) {
             Some(s) => s.to_string(),
-            None => dir.to_string_lossy().into_owned(), // .into_owned() で String に変換
+            None => dir.to_string_lossy().into_owned(), // Convert to String using .into_owned()
         };
 
-        let tree_text = build_tree(
-            dir,
-            &allowed,
-            &ignore,
-            &ignore_dirs,
-            &whitelist_filenames,
-        );
+        let tree_text = build_tree(dir, &allowed, &ignore, &ignore_dirs, &whitelist_filenames);
 
-        // format! に String を渡す（自動的に参照される）
-        all_tree_text.push_str(&format!("=== Tree for {} ===\n{}\n\n", dir_name_for_header, tree_text));
+        // Pass String to format! (it will be referenced automatically)
+        all_tree_text.push_str(&format!(
+            "=== Tree for {} ===\n{}\n\n",
+            dir_name_for_header, tree_text
+        ));
 
-
-        let files = collect_files(
-            dir,
-            &allowed,
-            &ignore,
-            &ignore_dirs,
-            &whitelist_filenames,
-        );
-
+        let files = collect_files(dir, &allowed, &ignore, &ignore_dirs, &whitelist_filenames);
 
         for file in files {
-            let relative_path = file
-                .strip_prefix(dir)
-                .unwrap_or(&file)
-                .to_string_lossy(); // format! 内で使われるだけなので Cow のままでも OK
+            let relative_path = file.strip_prefix(dir).unwrap_or(&file).to_string_lossy(); // Cow is fine here as it's only used within format!
 
-            // format! に String を渡す
+            // Pass String to format!
             let header = format!(
                 "--------------------------------------------------------------------------------\n{} (in {}):\n--------------------------------------------------------------------------------\n",
-                relative_path, dir_name_for_header // ここでも dir_name_for_header (String) を使用
+                relative_path, dir_name_for_header // Use dir_name_for_header (String) here as well
             );
             let size = fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
             let content = if size > args.max_size {
@@ -405,40 +470,40 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if !all_tree_text.is_empty() {
-         all_tree_text.pop();
+        all_tree_text.pop();
         all_tree_text.pop();
     }
-     if !all_file_contents.is_empty() {
-         all_file_contents.pop();
+    if !all_file_contents.is_empty() {
+        all_file_contents.pop();
         all_file_contents.pop();
     }
-
 
     let output_text = format!(
         "＜Directory Structure＞\n\n{}\n\n＜File Contents＞\n\n{}",
         all_tree_text, all_file_contents
     );
 
-
     if args.clipboard {
-         #[cfg(feature = "clipboard")]
+        #[cfg(feature = "clipboard")]
         {
-            // arboard は Cargo.toml で optional = true と features で設定されている前提
+            // Assumes arboard is set as optional = true and configured in features in Cargo.toml
             match arboard::Clipboard::new() {
                 Ok(mut clipboard) => {
                     clipboard.set_text(output_text)?;
                     println!("Output content has been copied to the clipboard.");
                 }
                 Err(e) => {
-                    eprintln!("Failed to access the clipboard: {}. Try writing to a file instead.", e);
-                 }
+                    eprintln!(
+                        "Failed to access the clipboard: {}. Try writing to a file instead.",
+                        e
+                    );
+                }
             }
         }
         #[cfg(not(feature = "clipboard"))]
         {
-              eprintln!("Clipboard feature is not enabled. Please compile with '--features clipboard' or use the -o option to write to a file.");
-         }
-
+            eprintln!("Clipboard feature is not enabled. Please compile with '--features clipboard' or use the -o option to write to a file.");
+        }
     } else {
         fs::write(&args.output, output_text)?;
         println!("Output completed: {}", args.output);
