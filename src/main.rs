@@ -54,7 +54,7 @@ struct Args {
     #[clap(
         short = 'w',
         long = "whitelist-filenames",
-        default_value = "Dockerfile,Makefile"
+        default_value = "Dockerfile,Makefile,justfile"
     )]
     whitelist_filenames: String,
 }
