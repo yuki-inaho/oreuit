@@ -36,6 +36,10 @@ struct Args {
     )]
     ignore_extensions: String,
 
+    /// Filenames to ignore (comma-separated, e.g., setup.py,config.toml). Overrides allowed extensions but not whitelist.
+    #[clap(long = "ignore-files", default_value = "")]
+    ignore_files: String,
+
     /// Output file name (default is summary.txt)
     #[clap(short = 'o', long = "output", default_value = "summary.txt")]
     output: String,
@@ -93,16 +97,17 @@ fn read_file_contents(file_path: &Path) -> String {
 }
 
 /// Recursively searches the specified directory and lists files that
-/// - Match allowed extensions
+/// - Match allowed extensions OR are whitelisted filenames
 /// - Do not have ignored extensions
-/// - Are in the whitelist_filenames (if any)
+/// - Are not ignored filenames
 /// Files within ignored directories are not searched.
 fn collect_files(
     directory: &Path,
     allowed: &HashSet<String>,
-    ignore: &HashSet<String>,
+    ignore_exts: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
     whitelist_filenames: &HashSet<String>,
+    ignore_files: &HashSet<String>,
 ) -> Vec<PathBuf> {
     let walker = WalkDir::new(directory).into_iter().filter_entry(|e| {
         if e.file_type().is_dir() {
@@ -112,47 +117,39 @@ fn collect_files(
         }
         true
     });
-
     let mut files = Vec::new();
     for entry in walker.filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
-            let file_name = entry.file_name().to_string_lossy();
-            let is_whitelisted = whitelist_filenames.contains(file_name.as_ref());
-
-            if !is_whitelisted {
-                if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
-                    let ext_formatted = format!(".{}", ext.to_lowercase());
-                    if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
-                        continue;
-                    }
-                    if ignore.contains(&ext_formatted) {
-                        continue;
-                    }
-                } else {
-                    // Allow filenames consisting only of alphanumeric characters and symbols (e.g., .gitignore, Makefile, LICENSE) even without an extension
-                    let fname = entry
-                        .path()
-                        .file_name()
-                        .and_then(|f| f.to_str())
-                        .unwrap_or("");
-                    let allowed_no_ext = [
-                        "Makefile",
-                        "Dockerfile",
-                        "LICENSE",
-                        "README",
-                        ".gitignore",
-                        ".gitattributes",
-                    ];
-                    if !allowed.is_empty() && !allowed_no_ext.contains(&fname) {
-                        continue;
-                    }
+            let path = entry.path();
+            let file_name_os = entry.file_name();
+            let file_name = file_name_os.to_string_lossy();
+            if whitelist_filenames.contains(file_name.as_ref()) {
+                files.push(path.to_path_buf());
+                continue;
+            }
+            if ignore_files.contains(file_name.as_ref()) {
+                continue;
+            }
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                let ext_formatted = format!(".{}", ext.to_lowercase());
+                if ignore_exts.contains(&ext_formatted) {
+                    continue;
+                }
+                if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
+                    continue;
+                }
+            } else {
+                let allowed_no_ext = [
+                    "Makefile", "Dockerfile", "LICENSE", "README", ".gitignore", ".gitattributes", "justfile"
+                ];
+                if !allowed.is_empty() && !allowed_no_ext.contains(&file_name.as_ref()) {
+                    continue;
                 }
             }
-            files.push(entry.path().to_path_buf());
+            files.push(path.to_path_buf());
         }
     }
-
-    files.sort_by_key(|e| e.file_name().map(|s| s.to_os_string()));
+    files.sort();
     files
 }
 
@@ -160,22 +157,24 @@ fn collect_files(
 fn build_tree(
     directory: &Path,
     allowed: &HashSet<String>,
-    ignore: &HashSet<String>,
+    ignore_exts: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
     whitelist_filenames: &HashSet<String>,
+    ignore_files: &HashSet<String>,
 ) -> String {
     let base_name = match directory.file_name().and_then(|s| s.to_str()) {
         Some(s) => s.to_string(),
-        None => directory.to_string_lossy().into_owned(), // Convert to String using .into_owned()
+        None => directory.to_string_lossy().into_owned(),
     };
     let mut lines = vec![base_name];
     build_tree_helper(
         directory,
         "",
         allowed,
-        ignore,
+        ignore_exts,
         ignore_dirs,
         whitelist_filenames,
+        ignore_files,
         &mut lines,
     );
     lines.join("\n")
@@ -186,9 +185,10 @@ fn build_tree_helper(
     path: &Path,
     prefix: &str,
     allowed: &HashSet<String>,
-    ignore: &HashSet<String>,
+    ignore_exts: &HashSet<String>,
     ignore_dirs: &HashSet<String>,
     whitelist_filenames: &HashSet<String>,
+    ignore_files: &HashSet<String>,
     lines: &mut Vec<String>,
 ) {
     let mut entries: Vec<fs::DirEntry> = match fs::read_dir(path) {
@@ -196,72 +196,51 @@ fn build_tree_helper(
         Err(_) => return,
     };
     entries.sort_by_key(|e| e.file_name());
-
-    let mut dirs = Vec::new();
-    let mut files = Vec::new();
+    let mut filtered_entries = Vec::new();
     for entry in entries {
         let entry_path = entry.path();
-        let name = entry.file_name().into_string().unwrap_or_default();
-
+        let file_name_os = entry.file_name();
+        let name_buf = file_name_os.to_string_lossy().to_string();
+        let name = &name_buf;
         if entry_path.is_dir() {
-            if ignore_dirs.contains(&name) {
+            if ignore_dirs.contains(name) {
                 continue;
             }
-            dirs.push(entry_path.clone()); // PathBuf型で格納
+            filtered_entries.push((entry, true));
         } else if entry_path.is_file() {
-            let is_whitelisted = whitelist_filenames.contains(&name);
-            if !is_whitelisted {
-                if let Some(ext_os) = entry_path.extension() {
-                    if let Some(ext) = ext_os.to_str() {
-                        let ext_formatted = format!(".{}", ext.to_lowercase());
-                        if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
-                            continue;
-                        }
-                        if ignore.contains(&ext_formatted) {
-                            continue;
-                        }
-                    }
-                } else {
-                    let fname = entry_path
-                        .file_name()
-                        .and_then(|f| f.to_str())
-                        .unwrap_or("");
-                    let allowed_no_ext = [
-                        "Makefile",
-                        "Dockerfile",
-                        "LICENSE",
-                        "README",
-                        ".gitignore",
-                        ".gitattributes",
-                    ];
-                    if !allowed.is_empty() && !allowed_no_ext.contains(&fname) {
-                        continue;
-                    }
+            if whitelist_filenames.contains(name) {
+                filtered_entries.push((entry, false));
+                continue;
+            }
+            if ignore_files.contains(name) {
+                continue;
+            }
+            if let Some(ext) = entry_path.extension().and_then(|e| e.to_str()) {
+                let ext_formatted = format!(".{}", ext.to_lowercase());
+                if ignore_exts.contains(&ext_formatted) {
+                    continue;
+                }
+                if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
+                    continue;
+                }
+            } else {
+                let allowed_no_ext = [
+                    "Makefile", "Dockerfile", "LICENSE", "README", ".gitignore", ".gitattributes", "justfile"
+                ];
+                if !allowed.is_empty() && !allowed_no_ext.contains(&name.as_ref()) {
+                    continue;
                 }
             }
-            files.push(entry_path.clone()); // PathBuf型で格納
+            filtered_entries.push((entry, false));
         }
     }
-
-    let mut all_entries = Vec::new();
-    for d in dirs {
-        all_entries.push((d, true));
-    }
-    for f in files {
-        all_entries.push((f, false));
-    }
-
-    let count = all_entries.len();
-    for (i, (entry, is_dir)) in all_entries.into_iter().enumerate() {
+    let count = filtered_entries.len();
+    for (i, (entry, is_dir)) in filtered_entries.into_iter().enumerate() {
         let is_last = i == count - 1;
         let connector = if is_last { "└── " } else { "├── " };
-        let name = entry
-            .file_name()
-            .and_then(|f| f.to_str())
-            .unwrap_or("")
-            .to_string();
+        let name_buf = entry.file_name().to_string_lossy().to_string();
+        let name = &name_buf;
         lines.push(format!("{}{}{}", prefix, connector, name));
-
         if is_dir {
             let new_prefix = if is_last {
                 format!("{}    ", prefix)
@@ -269,12 +248,13 @@ fn build_tree_helper(
                 format!("{}│   ", prefix)
             };
             build_tree_helper(
-                &entry,
+                &entry.path(),
                 &new_prefix,
                 allowed,
-                ignore,
+                ignore_exts,
                 ignore_dirs,
                 whitelist_filenames,
+                ignore_files,
                 lines,
             );
         }
@@ -389,7 +369,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let ignore: HashSet<String> = args
+    let ignore_exts: HashSet<String> = args
         .ignore_extensions
         .split(',')
         .filter_map(|s| {
@@ -448,32 +428,53 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
+    let ignore_files: HashSet<String> = args
+        .ignore_files
+        .split(',')
+        .filter_map(|s| {
+            let s = s.trim().to_string();
+            if s.is_empty() { None } else { Some(s) }
+        })
+        .collect();
+
     let mut all_tree_text = String::new();
     let mut all_file_contents = String::new();
 
     for dir in &directories {
         let dir_name_for_header = match dir.file_name().and_then(|s| s.to_str()) {
             Some(s) => s.to_string(),
-            None => dir.to_string_lossy().into_owned(), // Convert to String using .into_owned()
+            None => dir.to_string_lossy().into_owned(),
         };
 
-        let tree_text = build_tree(dir, &allowed, &ignore, &ignore_dirs, &whitelist_filenames);
+        let tree_text = build_tree(
+            dir,
+            &allowed,
+            &ignore_exts,
+            &ignore_dirs,
+            &whitelist_filenames,
+            &ignore_files,
+        );
 
-        // Pass String to format! (it will be referenced automatically)
         all_tree_text.push_str(&format!(
             "=== Tree for {} ===\n{}\n\n",
             dir_name_for_header, tree_text
         ));
 
-        let files = collect_files(dir, &allowed, &ignore, &ignore_dirs, &whitelist_filenames);
+        let files = collect_files(
+            dir,
+            &allowed,
+            &ignore_exts,
+            &ignore_dirs,
+            &whitelist_filenames,
+            &ignore_files,
+        );
 
         for file in files {
             let relative_path = file.strip_prefix(dir).unwrap_or(&file).to_string_lossy();
 
-            // Pass String to format!
             let header = format!(
                 "--------------------------------------------------------------------------------\n{} (in {}):\n--------------------------------------------------------------------------------\n",
-                relative_path, dir_name_for_header // Use dir_name_for_header (String) here as well
+                relative_path, dir_name_for_header
             );
             let size = fs::metadata(&file).map(|m| m.len()).unwrap_or(0);
             let content = if size > args.max_size {

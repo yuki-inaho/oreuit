@@ -1,104 +1,96 @@
 # oreuit
 
-- **oreuit** is a tool that generates a text report summarizing the file structure and contents within specified directories. Inspired by [uithub](https://uithub.com/).
-- It allows visualization of directory trees and bulk viewing of file contents for codebases without repositories, such as those not hosted on GitHub.
+- **oreuit** は、指定ディレクトリ配下のファイル構成・内容をまとめたテキストレポートを生成するツールです（[uithub](https://uithub.com/)インスパイア）。
+- GitHub等に未登録のコードベースでも、ディレクトリツリーやファイル内容を一括で可視化できます。
 
-# Installation
+# インストール
 
-## Requirements
+## 必要要件
 
-- [Rust](https://www.rust-lang.org/) installed (version 1.70 or higher recommended)
+- [Rust](https://www.rust-lang.org/)（1.70以上推奨）
 
-## Installation Steps
+## インストール手順
 
-1.  **Clone the Repository or Download the Code**
-    Obtain the source code of this tool from GitHub or other sources.
-
+1.  **リポジトリのクローンまたはコードの取得**
     ```bash
-    git clone https://github.com/yuki-inaho/uithub_like_text_generator.git # Use HTTPS or SSH URL as appropriate
+    git clone https://github.com/yuki-inaho/uithub_like_text_generator.git
     cd uithub_like_text_generator
     ```
-
-2.  **Build**
-    Execute the following command within the project directory to create a release build.
-
+2.  **ビルド**
     ```bash
-    # Standard build (without clipboard support)
+    # 標準ビルド（クリップボード機能なし）
     cargo build --release
-
-    # Build with clipboard support (if you need the -c option)
+    # クリップボード機能付きビルド（-cオプション利用時）
     # cargo build --release --features clipboard
     ```
-
-    If you plan to use the `-c, --clipboard` option, uncomment and run the second build command.
-
-3.  **Place the Executable**
-    After the build completes, the executable will be generated at `./target/release/oreuit`.
-    Add it to your system's PATH or specify the execution path as needed.
+    -c, --clipboard オプションを使う場合は2行目を有効化してください。
+3.  **実行ファイルの配置**
+    ビルド後、`./target/release/oreuit` が生成されます。PATHを通すか、直接パス指定で利用してください。
 
 # Usage
 
-The basic usage involves specifying the target directory/directories and options when running the tool. Below are the main command-line options and their descriptions.
+コマンド実行時に対象ディレクトリや各種オプションを指定します。主なコマンドラインオプションは以下の通りです。
 
 ## Available Options
 
 - `-d, --directory <DIRECTORIES>`
-  Specify the directory or directories (comma-separated) to explore. If not specified, the current directory (`.`) is used. (Example: `-d src,tests`)
+  - カンマ区切りで探索対象ディレクトリを指定（省略時はカレントディレクトリ）。例: `-d src,tests`
 
 - `-e, --extensions <EXTENSIONS>`
-  Provide a comma-separated list of allowed file extensions.
-
-  - If the value starts with `+,`, the specified extensions are **added** to the default list. (Example: `-e +,.json,.vue` adds `.json` and `.vue` to the default list.)
-  - Otherwise, the specified list **overwrites** the default list. (Example: `-e .py,.js` uses only `.py` and `.js`.)
-  - If not specified, the default list is used.
-    **Default:** `.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`, `.hpp`, `.ts`, `.tsx`, `.d.ts`, `.jsx`, `.toml`
-    **Note:** `.json` is not included by default. To include it, use `-e +,.json`.
-    **Note:** Files without extensions (e.g., `.gitignore`, `Makefile`, `Dockerfile`, `LICENSE`, `README`, `.gitattributes`) are allowed by default unless explicitly ignored.
+  - 許可するファイル拡張子をカンマ区切りで指定。
+  - 先頭が `+,` の場合はデフォルトリストに追加（例: `-e +,.json,.vue`）。
+  - そうでない場合は指定リストで上書き（例: `-e .py,.js`）。
+  - 省略時のデフォルト: `.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`, `.hpp`, `.ts`, `.tsx`, `.d.ts`, `.jsx`, `.toml`
+  - **注意:** `.json` はデフォルトに含まれません。必要な場合は `-e +,.json` で追加してください。
+  - **注意:** 拡張子なしファイル（例: `.gitignore`, `Makefile`, `Dockerfile`, `LICENSE`, `README`, `.gitattributes`, `justfile`）は明示的に除外しない限り許可されます。
 
 - `-i, --ignore-extensions <EXTENSIONS>`
-  Provide a comma-separated list of file extensions to ignore. (Example: `-i .lock,.md`)
-  The default value is:
-
-  ```
-  .bin,.zip,.tar,.gz,.7z,.rar,.exe,.dll,.so,.dylib,.a,.lib,.obj,.o,.class,.jar,.war,.ear,.ipynb,.jpg,.jpeg,.png,.gif
-  ```
+  - 無視する拡張子をカンマ区切りで指定。例: `-i .lock,.md`
+  - デフォルト:
+    ```
+    .bin,.zip,.tar,.gz,.7z,.rar,.exe,.dll,.so,.dylib,.a,.lib,.obj,.o,.class,.jar,.war,.ear,.ipynb,.jpg,.jpeg,.png,.gif
+    ```
 
 - `-o, --output <OUTPUT>`
-  Specify the output file name. The default is `summary.txt`.
+  - 出力ファイル名（デフォルト: `summary.txt`）
 
 - `-c, --clipboard`
-  Instead of writing the output to a file, copy the results to the clipboard.
-
-  **Note:** Requires the tool to be built with the `clipboard` feature enabled (see Installation section).
+  - ファイル出力の代わりにクリップボードへコピー（ビルド時 `--features clipboard` 必須）
 
 - `--ignore-dirs <DIRS>`
-  Provide a comma-separated list of directory names to ignore.
+  - 無視するディレクトリ名をカンマ区切りで指定。
+  - 先頭が `+,` の場合はデフォルトリストに追加（例: `--ignore-dirs +,my_temp,build2`）。
+  - そうでない場合は指定リストで上書き。
+  - デフォルト: `.git`, `.vscode`, `target`, `node_modules`, `__pycache__`, `.idea`, `build`, `dist`, `.ruff_cache`, `.cache`, `.tox`, `.nox`, `.pytest_cache`, `htmlcov`, `instance`, `.env`, `.venv`, `env`, `venv`, `ENV`, `site`, `.mypy_cache`, `debug` など
 
-  - If the value starts with `+,`, the specified directories are **added** to the default ignore list. (Example: `--ignore-dirs +,my_temp,build2` adds `my_temp` and `build2` to the default ignore list.)
-  - Otherwise, the specified list **overwrites** the default list.
-  - If not specified, the default list is used.
-    **Default:** `.git`, `.vscode`, `target`, `node_modules`, `__pycache__`, `.idea`, `build`, `dist`, `.ruff_cache`
+- `--ignore-files <FILENAMES>`
+  - 無視する**ファイル名**をカンマ区切りで指定。例: `--ignore-files Cargo.lock,summary.txt_example`
+  - 拡張子指定よりも優先されますが、`--whitelist-filenames` に含まれる場合は無視されません。
 
 - `--max-size <MAX_SIZE>`
-  Specify the maximum file size (in bytes) for reading file contents. The default is `10485760` (10MB).
-  Files exceeding the specified size will have their content extraction skipped.
+  - ファイル内容を読み込む最大サイズ（バイト単位、デフォルト: 10485760=10MB）。
 
 - `-w, --whitelist-filenames <FILENAMES>`
-  Specify a comma-separated list of filenames that are always included, regardless of their file extension or location. (Example: `Dockerfile,Makefile`)
+  - 常に含めるファイル名をカンマ区切りで指定（例: `Dockerfile,Makefile`）。デフォルト: `Dockerfile,Makefile,justfile`
 
 ---
 
 ## Command and Output Examples
 
-Example commands:
-
 ```bash
-# Scan the current directory, ignoring temp and adding .json files
+# カレントディレクトリを探索し、tempディレクトリを無視し、.jsonも対象に追加
 ./target/release/oreuit -d . --ignore-dirs +,temp -e +,.json -o summary.txt
 
-# Scan the src directory, using only .py and .js extensions
+# srcディレクトリのみ、.pyと.jsのみ対象
 ./target/release/oreuit -d src -e .py,.js -o summary_src.txt
 
-# Scan the current directory, ignoring only the 'build' directory (overwrites default ignore list)
+# buildディレクトリのみを無視（デフォルトリストを上書き）
 ./target/release/oreuit -d . --ignore-dirs build -o summary_build_only.txt
+
+# Cargo.lock, summary.txt_example というファイル名を無視してsummary.txtを生成
+./target/release/oreuit --ignore-files Cargo.lock,summary.txt_example -o summary.txt
 ```
+
+---
+
+- 詳細な使い方やオプションの優先順位は `--help` も参照してください。
