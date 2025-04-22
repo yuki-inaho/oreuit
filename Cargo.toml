@@ -10,6 +10,7 @@ clap = { version = "4.1", features = ["derive"] }
 walkdir = "2.3"
 encoding_rs = "0.8"
 arboard = { version = "3.4.1", optional = true }
+lazy_static = "1.4.0"
 
 [features]
 default = []

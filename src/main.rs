@@ -5,6 +5,9 @@ use std::error::Error;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+#[macro_use]
+extern crate lazy_static;
+
 use walkdir::WalkDir;
 
 /// Tool to summarize directory structure and file contents
@@ -113,12 +116,11 @@ fn collect_files(
     let mut files = Vec::new();
     for entry in walker.filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
-            let path = entry.path();
-            let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
-            let is_whitelisted = whitelist_filenames.contains(file_name);
+            let file_name = entry.file_name().to_string_lossy();
+            let is_whitelisted = whitelist_filenames.contains(file_name.as_ref());
 
             if !is_whitelisted {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
                     let ext_formatted = format!(".{}", ext.to_lowercase());
                     if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
                         continue;
@@ -128,7 +130,11 @@ fn collect_files(
                     }
                 } else {
                     // Allow filenames consisting only of alphanumeric characters and symbols (e.g., .gitignore, Makefile, LICENSE) even without an extension
-                    let fname = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
+                    let fname = entry
+                        .path()
+                        .file_name()
+                        .and_then(|f| f.to_str())
+                        .unwrap_or("");
                     let allowed_no_ext = [
                         "Makefile",
                         "Dockerfile",
@@ -142,15 +148,11 @@ fn collect_files(
                     }
                 }
             }
-            files.push(path.to_path_buf());
+            files.push(entry.path().to_path_buf());
         }
     }
 
-    files.sort_by(|a, b| {
-        a.strip_prefix(directory)
-            .unwrap_or(a)
-            .cmp(b.strip_prefix(directory).unwrap_or(b))
-    });
+    files.sort_by_key(|e| e.file_name().map(|s| s.to_os_string()));
     files
 }
 
@@ -205,7 +207,7 @@ fn build_tree_helper(
             if ignore_dirs.contains(&name) {
                 continue;
             }
-            dirs.push(entry);
+            dirs.push(entry_path.clone()); // PathBuf型で格納
         } else if entry_path.is_file() {
             let is_whitelisted = whitelist_filenames.contains(&name);
             if !is_whitelisted {
@@ -220,7 +222,6 @@ fn build_tree_helper(
                         }
                     }
                 } else {
-                    // Allow filenames consisting only of alphanumeric characters and symbols (e.g., .gitignore, Makefile, LICENSE) even without an extension
                     let fname = entry_path
                         .file_name()
                         .and_then(|f| f.to_str())
@@ -238,7 +239,7 @@ fn build_tree_helper(
                     }
                 }
             }
-            files.push(entry);
+            files.push(entry_path.clone()); // PathBuf型で格納
         }
     }
 
@@ -254,7 +255,11 @@ fn build_tree_helper(
     for (i, (entry, is_dir)) in all_entries.into_iter().enumerate() {
         let is_last = i == count - 1;
         let connector = if is_last { "└── " } else { "├── " };
-        let name = entry.file_name().into_string().unwrap_or_default();
+        let name = entry
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("")
+            .to_string();
         lines.push(format!("{}{}{}", prefix, connector, name));
 
         if is_dir {
@@ -264,7 +269,7 @@ fn build_tree_helper(
                 format!("{}│   ", prefix)
             };
             build_tree_helper(
-                &entry.path(),
+                &entry,
                 &new_prefix,
                 allowed,
                 ignore,
@@ -274,6 +279,44 @@ fn build_tree_helper(
             );
         }
     }
+}
+
+lazy_static! {
+    static ref DEFAULT_ALLOWED_EXTENSIONS: HashSet<String> = [
+        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp",
+        ".ts", ".tsx", ".d.ts", ".jsx", ".toml",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    static ref DEFAULT_IGNORE_DIRS: HashSet<String> = [
+        ".git",
+        ".vscode",
+        "target",
+        "node_modules",
+        "__pycache__",
+        ".idea",
+        "build",
+        "dist",
+        ".ruff_cache",
+        ".cache",
+        ".tox",
+        ".nox",
+        ".pytest_cache",
+        "htmlcov",
+        "instance",
+        ".env",
+        ".venv",
+        "env",
+        "venv",
+        "ENV",
+        "site",
+        ".mypy_cache",
+        "debug",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -309,22 +352,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let default_allowed: HashSet<String> = [
-        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp",
-        ".ts", ".tsx", ".d.ts", ".jsx", ".toml",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-
     let allowed: HashSet<String> = match &args.extensions {
-        None => default_allowed.clone(),
+        None => DEFAULT_ALLOWED_EXTENSIONS.clone(),
         Some(val) => {
             let val = val.trim();
             if val.is_empty() {
-                default_allowed.clone()
+                DEFAULT_ALLOWED_EXTENSIONS.clone()
             } else if val.starts_with("+,") {
-                let mut set = default_allowed.clone();
+                let mut set = DEFAULT_ALLOWED_EXTENSIONS.clone();
                 for s in val.trim_start_matches("+,").split(',') {
                     let s = s.trim().to_lowercase();
                     if s.is_empty() {
@@ -369,29 +404,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
-    let default_ignore_dirs: HashSet<String> = [
-        ".git",
-        ".vscode",
-        "target",
-        "node_modules",
-        "__pycache__",
-        ".idea",
-        "build",
-        "dist",
-        ".ruff_cache",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-
     let ignore_dirs: HashSet<String> = match &args.ignore_dirs {
-        None => default_ignore_dirs.clone(),
+        None => DEFAULT_IGNORE_DIRS.clone(),
         Some(val) => {
             let val = val.trim();
             if val.is_empty() {
-                default_ignore_dirs.clone()
+                DEFAULT_IGNORE_DIRS.clone()
             } else if val.starts_with("+,") {
-                let mut set = default_ignore_dirs.clone();
+                let mut set = DEFAULT_IGNORE_DIRS.clone();
                 for s in val.trim_start_matches("+,").split(',') {
                     let s = s.trim().to_string();
                     if s.is_empty() {
@@ -448,7 +468,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let files = collect_files(dir, &allowed, &ignore, &ignore_dirs, &whitelist_filenames);
 
         for file in files {
-            let relative_path = file.strip_prefix(dir).unwrap_or(&file).to_string_lossy(); // Cow is fine here as it's only used within format!
+            let relative_path = file.strip_prefix(dir).unwrap_or(&file).to_string_lossy();
 
             // Pass String to format!
             let header = format!(
