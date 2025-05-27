@@ -54,7 +54,7 @@ struct Args {
 
     /// Directory names to ignore (comma-separated, e.g., .git,node_modules,__pycache__, etc.)
     /// Prefix with '+,' to ADD to the default list (e.g., +,my_temp,build2).
-    #[clap(long = "ignore-dirs")]
+    #[clap(short = 'I', long = "ignore-dirs")]
     ignore_dirs: Option<String>,
 
     /// Filenames to whitelist (comma-separated, e.g., Dockerfile,Makefile). These are always included.
@@ -140,7 +140,13 @@ fn collect_files(
                 }
             } else {
                 let allowed_no_ext = [
-                    "Makefile", "Dockerfile", "LICENSE", "README", ".gitignore", ".gitattributes", "justfile"
+                    "Makefile",
+                    "Dockerfile",
+                    "LICENSE",
+                    "README",
+                    ".gitignore",
+                    ".gitattributes",
+                    "justfile",
                 ];
                 if !allowed.is_empty() && !allowed_no_ext.contains(&file_name.as_ref()) {
                     continue;
@@ -225,7 +231,13 @@ fn build_tree_helper(
                 }
             } else {
                 let allowed_no_ext = [
-                    "Makefile", "Dockerfile", "LICENSE", "README", ".gitignore", ".gitattributes", "justfile"
+                    "Makefile",
+                    "Dockerfile",
+                    "LICENSE",
+                    "README",
+                    ".gitignore",
+                    ".gitattributes",
+                    "justfile",
                 ];
                 if !allowed.is_empty() && !allowed_no_ext.contains(&name.as_ref()) {
                     continue;
@@ -433,7 +445,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .split(',')
         .filter_map(|s| {
             let s = s.trim().to_string();
-            if s.is_empty() { None } else { Some(s) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         })
         .collect();
 

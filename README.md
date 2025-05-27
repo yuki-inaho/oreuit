@@ -57,7 +57,7 @@
 - `-c, --clipboard`
   - ファイル出力の代わりにクリップボードへコピー（ビルド時 `--features clipboard` 必須）
 
-- `--ignore-dirs <DIRS>`
+- `-I, --ignore-dirs <DIRS>`
   - 無視するディレクトリ名をカンマ区切りで指定。
   - 先頭が `+,` の場合はデフォルトリストに追加（例: `--ignore-dirs +,my_temp,build2`）。
   - そうでない場合は指定リストで上書き。
@@ -79,7 +79,7 @@
 
 ```bash
 # カレントディレクトリを探索し、tempディレクトリを無視し、.jsonも対象に追加
-./target/release/oreuit -d . --ignore-dirs +,temp -e +,.json -o summary.txt
+./target/release/oreuit -d . -I +,temp -e +,.json -o summary.txt
 
 # srcディレクトリのみ、.pyと.jsのみ対象
 ./target/release/oreuit -d src -e .py,.js -o summary_src.txt
