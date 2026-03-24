@@ -277,6 +277,7 @@ lazy_static! {
     static ref DEFAULT_ALLOWED_EXTENSIONS: HashSet<String> = [
         ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp",
         ".ts", ".tsx", ".d.ts", ".jsx", ".toml",
+        ".msg", ".srv", ".action", ".launch", ".urdf", ".xacro", ".cfg",
     ]
     .iter()
     .map(|s| s.to_string())
