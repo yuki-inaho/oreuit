@@ -13,8 +13,8 @@
 
 1.  **リポジトリのクローンまたはコードの取得**
     ```bash
-    git clone https://github.com/yuki-inaho/uithub_like_text_generator.git
-    cd uithub_like_text_generator
+    git clone https://github.com/yuki-inaho/oreuit.git
+    cd oreuit
     ```
 2.  **ビルド**
     ```bash
@@ -31,47 +31,140 @@
 
 コマンド実行時に対象ディレクトリや各種オプションを指定します。主なコマンドラインオプションは以下の通りです。
 
+- `oreuit -h`
+  - オプション一覧を素早く確認するための短い help です。
+- `oreuit --help`
+  - 優先順位、config 切替、basename マッチ、placeholder 出力、既定値、具体例まで含む完全版 help です。
+  - 実運用時は基本的にこちらを参照してください。
+
 ## Available Options
 
 - `-d, --directory <DIRECTORIES>`
   - カンマ区切りで探索対象ディレクトリを指定（省略時はカレントディレクトリ）。例: `-d src,tests`
+  - 各要素は trim されます。
+  - 存在しない path やディレクトリでない path は warning を出して skip します。
+  - 全件無効だった場合は出力を生成せず終了します。
 
 - `-e, --extensions <EXTENSIONS>`
   - 許可するファイル拡張子をカンマ区切りで指定。
   - 先頭が `+,` の場合はデフォルトリストに追加（例: `-e +,.json,.vue`）。
   - そうでない場合は指定リストで上書き（例: `-e .py,.js`）。
-  - 省略時のデフォルト: `.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`, `.hpp`, `.ts`, `.tsx`, `.d.ts`, `.jsx`, `.toml`
+  - `rs`, `.rs`, ` RS ` のような表記ゆれは内部で正規化されます。
+  - 省略時のデフォルト: `.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`, `.hpp`, `.ts`, `.tsx`, `.d.ts`, `.jsx`, `.toml`, `.msg`, `.srv`, `.action`, `.launch`, `.urdf`, `.xacro`, `.cfg`
   - **注意:** `.json` はデフォルトに含まれません。必要な場合は `-e +,.json` で追加してください。
-  - **注意:** 拡張子なしファイル（例: `.gitignore`, `Makefile`, `Dockerfile`, `LICENSE`, `README`, `.gitattributes`, `justfile`）は明示的に除外しない限り許可されます。
+  - **注意:** 拡張子なしファイル（例: `.gitignore`, `Makefile`, `Dockerfile`, `LICENSE`, `README`, `.gitattributes`, `justfile`）は別の既定ルールで扱われます。
 
 - `-i, --ignore-extensions <EXTENSIONS>`
   - 無視する拡張子をカンマ区切りで指定。例: `-i .lock,.md`
+  - `--extensions` と同様に正規化されます。
   - デフォルト:
     ```
     .bin,.zip,.tar,.gz,.7z,.rar,.exe,.dll,.so,.dylib,.a,.lib,.obj,.o,.class,.jar,.war,.ear,.ipynb,.jpg,.jpeg,.png,.gif
     ```
+  - 空文字列を渡すと拡張子ベースの ignore を無効化できます。
 
 - `-o, --output <OUTPUT>`
   - 出力ファイル名（デフォルト: `summary.txt`）
+  - `--generate-config` 使用時は使われません。
 
 - `-c, --clipboard`
   - ファイル出力の代わりにクリップボードへコピー（ビルド時 `--features clipboard` 必須）
+  - 成功時は `--output` には書き込みません。
+  - `clipboard` feature なしビルドでは stderr に説明を出し、ファイルも書きません。
 
 - `-I, --ignore-dirs <DIRS>`
   - 無視するディレクトリ名をカンマ区切りで指定。
   - 先頭が `+,` の場合はデフォルトリストに追加（例: `--ignore-dirs +,my_temp,build2`）。
   - そうでない場合は指定リストで上書き。
+  - 相対パスではなく**ディレクトリ名**一致です。
+  - tree 表示と file contents 収集の両方から除外されます。
   - デフォルト: `.git`, `.vscode`, `target`, `node_modules`, `__pycache__`, `.idea`, `build`, `dist`, `.ruff_cache`, `.cache`, `.tox`, `.nox`, `.pytest_cache`, `htmlcov`, `instance`, `.env`, `.venv`, `env`, `venv`, `ENV`, `site`, `.mypy_cache`, `debug` など
 
 - `--ignore-files <FILENAMES>`
   - 無視する**ファイル名**をカンマ区切りで指定。例: `--ignore-files Cargo.lock,summary.txt_example`
+  - 相対パスではなく**basename**一致です。
   - 拡張子指定よりも優先されますが、`--whitelist-filenames` に含まれる場合は無視されません。
 
 - `--max-size <MAX_SIZE>`
   - ファイル内容を読み込む最大サイズ（バイト単位、デフォルト: 10485760=10MB）。
+  - 超過したファイルは report には残りますが、内容部分は `[File size exceeds limit; skipped]` になります。
 
 - `-w, --whitelist-filenames <FILENAMES>`
   - 常に含めるファイル名をカンマ区切りで指定（例: `Dockerfile,Makefile`）。デフォルト: `Dockerfile,Makefile,justfile`
+  - 相対パスではなく**basename**一致です。
+  - `--ignore-files` より優先されます。
+
+- `--config <CONFIG>`
+  - whitelist / blacklist を定義した TOML 設定ファイルを読み込みます。
+  - `--config` 指定時、フィルタ条件は **config 側に完全切替** されます。
+  - つまり `--extensions` / `--ignore-extensions` / `--ignore-dirs` / `--ignore-files` / `--whitelist-filenames` とは暗黙 merge されません。
+  - 一方で `-d, --directory`、`-o, --output`、`--max-size`、`-c, --clipboard` は通常どおり有効です。
+  - `whitelist.files` / `blacklist.files` は basename 一致、`blacklist.directories` は directory name 一致です。
+  - `whitelist.extensions` が空の場合、拡張子 allowlist を適用しません。
+
+- `--generate-config`
+  - 現在のデフォルト設定相当の TOML を標準出力へ出力して終了します。
+  - このオプションは早期終了し、探索、config 読み込み、出力ファイル書き込み、clipboard 処理は行いません。
+
+## TOML Configuration
+
+`--generate-config` でテンプレートを生成し、そのまま編集して `--config` に渡せます。
+
+```toml
+[whitelist]
+extensions = [".rs", ".py"]
+files = ["Dockerfile", "Makefile", "justfile"]
+
+[blacklist]
+extensions = [".png", ".jpg"]
+files = ["Cargo.lock"]
+directories = [".git", "target", "node_modules"]
+```
+
+各フィールドの意味:
+
+- `whitelist.extensions`
+  - 含める拡張子一覧です。
+  - `rs`, `.rs`, ` RS ` のような表記ゆれは内部で正規化され、同じ意味として扱われます。
+
+- `whitelist.files`
+  - 常に含めるファイル名一覧です。
+  - `blacklist.files` より優先されます。
+
+- `blacklist.extensions`
+  - 除外する拡張子一覧です。
+
+- `blacklist.files`
+  - 除外するファイル名一覧です。
+
+- `blacklist.directories`
+  - 再帰探索と tree 表示の両方から除外するディレクトリ名一覧です。
+
+### Precedence and Behavior
+
+- `--config` を指定した場合、フィルタ設定は TOML のみを使います。CLI のフィルタ系オプションとは混ざりません。
+- `whitelist.files` は `blacklist.files` より優先されます。
+- `--ignore-files` / `--whitelist-filenames` は basename 一致、`--ignore-dirs` / `blacklist.directories` は directory name 一致です。
+- 拡張子は `rs`, `.rs`, ` RS ` のような入力でも `.rs` として正規化されます。
+- 拡張子なしファイルは、拡張子 allowlist が有効なときに限り、`Dockerfile`, `Makefile`, `LICENSE`, `README`, `.gitignore`, `.gitattributes`, `justfile` を既定で扱います。
+- `whitelist.extensions` が空の config では拡張子 allowlist が無効になり、非除外の拡張子付きファイルと拡張子なしファイルを広く拾います。
+- `--generate-config` が出力する `whitelist.files` は `Dockerfile`, `Makefile`, `justfile` ですが、config 経路でも既定の extensionless 挙動は維持されます。
+
+### Placeholder Output
+
+- サイズ超過: `[File size exceeds limit; skipped]`
+- バイナリ判定（先頭 1024 byte に NUL を含む）: `[Binary file skipped]`
+- 文字コードは UTF-8 を先に試し、失敗時に Shift_JIS を試します。
+- それでも decode できない場合: `[Cannot decode file content]`
+
+### Error Behavior
+
+- 存在しない config パスを指定した場合:
+  - `Failed to load config file '/path/to/config.toml': Config file not found or unreadable: ...`
+- TOML 構文が不正な場合:
+  - `Failed to load config file '/path/to/config.toml': Config TOML parse error: ...`
+
+どちらも先頭に `Failed to load config file '...'` が付き、その後ろの理由で missing path と parse error が区別されます。
 
 ---
 
@@ -89,6 +182,18 @@
 
 # Cargo.lock, summary.txt_example というファイル名を無視してsummary.txtを生成
 ./target/release/oreuit --ignore-files Cargo.lock,summary.txt_example -o summary.txt
+
+# デフォルト相当の設定テンプレートを生成して保存
+./target/release/oreuit --generate-config > oreuit.toml
+
+# 生成した TOML を編集して適用
+./target/release/oreuit --config oreuit.toml -d . -o summary_from_config.txt
+
+# config 指定時でも出力先や対象ディレクトリは CLI で指定できる
+./target/release/oreuit --config oreuit.toml -d src,tests --max-size 2097152 -o summary_filtered.txt
+
+# 不正 TOML の挙動を確認
+./target/release/oreuit --config broken.toml -d .
 ```
 
 ---
