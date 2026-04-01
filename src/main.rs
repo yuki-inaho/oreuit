@@ -11,6 +11,73 @@ extern crate lazy_static;
 
 use walkdir::WalkDir;
 
+const SHORT_ABOUT: &str = "Generate a text snapshot of directory trees and file contents.";
+const LONG_ABOUT: &str = r#"oreuit scans one or more directories and produces a plain-text report with two sections:
+
+1. ＜Directory Structure＞
+   A filtered tree view for each requested directory.
+2. ＜File Contents＞
+   The matching files, in sorted order, with a header that shows the file path and source directory.
+
+Use `-h` for the compact option list.
+Use `--help` for filtering precedence, config-mode behavior, default lists, placeholder outputs, and examples."#;
+const SHORT_AFTER_HELP: &str = r#"Run `oreuit --help` for filtering precedence, config-mode behavior,
+default lists, placeholder outputs, and usage examples."#;
+const LONG_AFTER_HELP: &str = r#"Selection precedence (highest first):
+  1. Whitelisted filenames are always included.
+  2. Ignored filenames are excluded if they were not whitelisted.
+  3. Ignored extensions are excluded.
+  4. If an extension allowlist is active, only those extensions are kept.
+  5. If no extension allowlist is active (for example, an empty `whitelist.extensions`
+     in a TOML config), all non-ignored extensions and all extensionless files are eligible.
+
+Matching rules:
+  - `--ignore-files` and `--whitelist-filenames` match basenames only, not relative paths.
+  - `--ignore-dirs` and `blacklist.directories` match directory names only.
+  - Extension strings are normalized, so `rs`, `.rs`, and ` RS ` all mean `.rs`.
+  - When an extension allowlist is active, these extensionless filenames are also eligible
+    by default: `.gitignore`, `.gitattributes`, `Dockerfile`, `LICENSE`, `Makefile`,
+    `README`, `justfile`.
+
+Output behavior:
+  - Files larger than `--max-size` produce `[File size exceeds limit; skipped]`.
+  - Files with a NUL byte in the first 1024 bytes produce `[Binary file skipped]`.
+  - oreuit reads UTF-8 first, then falls back to Shift_JIS.
+  - If decoding still fails, oreuit emits `[Cannot decode file content]`.
+  - The final report is written to `--output`, unless `-c/--clipboard` is used successfully.
+  - `-c/--clipboard` requires a binary built with `--features clipboard`. Without that
+    feature, oreuit prints an explanatory error to stderr and does not write a file.
+
+Config mode:
+  - `--config` replaces the filter-related CLI flags `--extensions`,
+    `--ignore-extensions`, `--ignore-dirs`, `--ignore-files`, and
+    `--whitelist-filenames`.
+  - These options still work with `--config`: `--directory`, `--output`, `--max-size`,
+    and `--clipboard`.
+  - `--generate-config` prints the built-in defaults as TOML to stdout and exits
+    immediately, before directory validation or scanning.
+
+Default allowed extensions:
+  `.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`,
+  `.hpp`, `.ts`, `.tsx`, `.d.ts`, `.jsx`, `.toml`, `.msg`, `.srv`, `.action`,
+  `.launch`, `.urdf`, `.xacro`, `.cfg`
+
+Default ignored extensions:
+  `.bin`, `.zip`, `.tar`, `.gz`, `.7z`, `.rar`, `.exe`, `.dll`, `.so`, `.dylib`, `.a`,
+  `.lib`, `.obj`, `.o`, `.class`, `.jar`, `.war`, `.ear`, `.ipynb`, `.jpg`, `.jpeg`,
+  `.png`, `.gif`
+
+Default ignored directories:
+  `.git`, `.vscode`, `target`, `node_modules`, `__pycache__`, `.idea`, `build`, `dist`,
+  `.ruff_cache`, `.cache`, `.tox`, `.nox`, `.pytest_cache`, `htmlcov`, `instance`,
+  `.env`, `.venv`, `env`, `venv`, `ENV`, `site`, `.mypy_cache`, `debug`
+
+Examples:
+  oreuit -d src,tests -e +,.json -o summary.txt
+  oreuit --ignore-files Cargo.lock,summary.txt_example -o summary.txt
+  oreuit --generate-config > oreuit.toml
+  oreuit --config oreuit.toml -d . -o summary_from_config.txt"#;
+
 #[derive(Debug, Deserialize, Serialize, Default)]
 struct WhitelistConfig {
     #[serde(default)]
@@ -51,62 +118,100 @@ struct FilterRules {
 #[clap(
     author,
     version,
-    about = "A tool to summarize directory structure and file contents (similar to uithub)"
+    about = SHORT_ABOUT,
+    long_about = LONG_ABOUT,
+    after_help = SHORT_AFTER_HELP,
+    after_long_help = LONG_AFTER_HELP
 )]
 struct Args {
-    /// Directories to explore (comma-separated, default is the current directory)
-    #[clap(short = 'd', long = "directory", default_value = ".")]
+    #[clap(
+        short = 'd',
+        long = "directory",
+        default_value = ".",
+        help = "Comma-separated directories to scan",
+        long_help = "Comma-separated directories to scan.\n\nEach entry is trimmed before use.\nNon-existent paths and non-directory paths are skipped with a warning.\nIf every entry is invalid, oreuit prints an error and exits without generating output."
+    )]
     directories: String,
 
-    /// Allowed file extensions (comma-separated, e.g., .txt,.md,.py).
-    /// Prefix with '+,' to ADD to the default list (e.g., +,.json,.vue).
-    /// If not specified, the default list is used.
-    #[clap(short = 'e', long = "extensions")]
+    #[clap(
+        short = 'e',
+        long = "extensions",
+        help = "Allowed extensions. `+,` adds to defaults; otherwise replaces them",
+        long_help = "Allowed extensions, separated by commas.\n\nExamples:\n  --extensions .rs,.toml\n  --extensions +,.json,.vue\n\nRules:\n  - Prefix with `+,` to add to the built-in allowlist.\n  - Without `+,`, the provided list replaces the built-in allowlist.\n  - Extension strings are normalized, so `rs`, `.rs`, and ` RS ` are treated as `.rs`.\n  - If this option is omitted, oreuit uses the built-in allowlist.\n  - Extensionless files are controlled by a separate built-in rule and are not listed here.\n  - This option is ignored when `--config` is used."
+    )]
     extensions: Option<String>,
 
-    /// File extensions to ignore (comma-separated, e.g., .bin,.zip,...). If empty, no extensions are ignored
     #[clap(
         short = 'i',
         long = "ignore-extensions",
-        default_value = ".bin,.zip,.tar,.gz,.7z,.rar,.exe,.dll,.so,.dylib,.a,.lib,.obj,.o,.class,.jar,.war,.ear,.ipynb,.jpg,.jpeg,.png,.gif"
+        default_value = ".bin,.zip,.tar,.gz,.7z,.rar,.exe,.dll,.so,.dylib,.a,.lib,.obj,.o,.class,.jar,.war,.ear,.ipynb,.jpg,.jpeg,.png,.gif",
+        help = "Extensions to exclude after normalization",
+        long_help = "Extensions to exclude after normalization.\n\nExamples:\n  --ignore-extensions .lock,.svg\n  --ignore-extensions ''\n\nRules:\n  - Values are normalized the same way as `--extensions`.\n  - The built-in ignore list is used by default.\n  - Passing an empty value disables extension-based excludes.\n  - Ignored extensions are still overridden by whitelisted filenames.\n  - This option is ignored when `--config` is used."
     )]
     ignore_extensions: String,
 
-    /// Filenames to ignore (comma-separated, e.g., setup.py,config.toml). Overrides allowed extensions but not whitelist.
-    #[clap(long = "ignore-files", default_value = "")]
+    #[clap(
+        long = "ignore-files",
+        default_value = "",
+        help = "Basename-only file exclusions. Whitelist still wins",
+        long_help = "Comma-separated filenames to ignore. Matching is by basename only, not by relative path.\n\nExamples:\n  --ignore-files Cargo.lock,summary.txt_example\n\nRules:\n  - This check runs before extension allowlisting.\n  - Whitelisted filenames still win over ignored filenames.\n  - This option is ignored when `--config` is used."
+    )]
     ignore_files: String,
 
-    /// Output file name (default is summary.txt)
-    #[clap(short = 'o', long = "output", default_value = "summary.txt")]
+    #[clap(
+        short = 'o',
+        long = "output",
+        default_value = "summary.txt",
+        help = "Write the final report to this file",
+        long_help = "Write the final report to this file.\n\nRules:\n  - The default output path is `summary.txt`.\n  - This option is ignored when `--generate-config` is used, because that mode writes TOML to stdout.\n  - This option is also bypassed when `--clipboard` succeeds."
+    )]
     output: String,
 
-    /// Maximum file size to read (in bytes, default is 10485760 = 10MB)
-    #[clap(long = "max-size", default_value = "10485760")]
+    #[clap(
+        long = "max-size",
+        default_value = "10485760",
+        help = "Maximum file size to read, in bytes",
+        long_help = "Maximum file size to read, in bytes.\n\nFiles larger than this limit are still listed in the report, but their content section becomes `[File size exceeds limit; skipped]`."
+    )]
     max_size: u64,
 
-    /// Copy output to clipboard instead of writing to a file
-    #[clap(short = 'c', long = "clipboard")]
+    #[clap(
+        short = 'c',
+        long = "clipboard",
+        help = "Copy the report to the clipboard instead of writing a file",
+        long_help = "Copy the report to the clipboard instead of writing a file.\n\nRules:\n  - Requires a binary built with `--features clipboard`.\n  - On success, oreuit does not write `--output`.\n  - Without the feature, oreuit prints an explanatory error to stderr and does not write a file."
+    )]
     clipboard: bool,
 
-    /// Directory names to ignore (comma-separated, e.g., .git,node_modules,__pycache__, etc.)
-    /// Prefix with '+,' to ADD to the default list (e.g., +,my_temp,build2).
-    #[clap(short = 'I', long = "ignore-dirs")]
+    #[clap(
+        short = 'I',
+        long = "ignore-dirs",
+        help = "Directory-name exclusions. `+,` adds to defaults",
+        long_help = "Directory names to ignore, separated by commas.\n\nExamples:\n  --ignore-dirs build\n  --ignore-dirs +,temp,.serena\n\nRules:\n  - Matching is by directory name only, not by relative path.\n  - Prefix with `+,` to add to the built-in ignore list.\n  - Without `+,`, the provided list replaces the built-in ignore list.\n  - Ignored directories are excluded from both tree output and file-content collection.\n  - This option is ignored when `--config` is used."
+    )]
     ignore_dirs: Option<String>,
 
-    /// Filenames to whitelist (comma-separated, e.g., Dockerfile,Makefile). These are always included.
     #[clap(
         short = 'w',
         long = "whitelist-filenames",
-        default_value = "Dockerfile,Makefile,justfile"
+        default_value = "Dockerfile,Makefile,justfile",
+        help = "Basename-only files that are always included",
+        long_help = "Comma-separated filenames to always include. Matching is by basename only, not by relative path.\n\nExamples:\n  --whitelist-filenames Dockerfile,Makefile,justfile\n\nRules:\n  - Whitelisted filenames are included even if their extension is not in the allowlist.\n  - Whitelisted filenames also override `--ignore-files`.\n  - Ignored directories still prevent traversal into that directory.\n  - This option is ignored when `--config` is used."
     )]
     whitelist_filenames: String,
 
-    /// Path to a TOML config file for whitelist/blacklist settings
-    #[clap(long = "config")]
+    #[clap(
+        long = "config",
+        help = "Load whitelist/blacklist filters from a TOML file",
+        long_help = "Load whitelist/blacklist filters from a TOML file.\n\nRules:\n  - `--config` replaces the filter-related CLI flags `--extensions`, `--ignore-extensions`, `--ignore-dirs`, `--ignore-files`, and `--whitelist-filenames`.\n  - `--directory`, `--output`, `--max-size`, and `--clipboard` still apply.\n  - `whitelist.extensions` is normalized the same way as CLI extensions.\n  - `whitelist.files` and `blacklist.files` match basenames only.\n  - `blacklist.directories` matches directory names only.\n  - If `whitelist.extensions` is empty, oreuit does not apply an extension allowlist.\n  - Missing files and TOML parse errors are reported with different error messages."
+    )]
     config: Option<String>,
 
-    /// Generate a default config TOML and print to stdout, then exit
-    #[clap(long = "generate-config")]
+    #[clap(
+        long = "generate-config",
+        help = "Print the built-in filter defaults as TOML and exit",
+        long_help = "Print the built-in filter defaults as TOML to stdout and exit.\n\nRules:\n  - This happens before directory validation, config loading, scanning, output-file writing, or clipboard handling.\n  - Use this to bootstrap a config file for `--config`."
+    )]
     generate_config: bool,
 }
 
