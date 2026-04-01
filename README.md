@@ -40,7 +40,7 @@
   - 許可するファイル拡張子をカンマ区切りで指定。
   - 先頭が `+,` の場合はデフォルトリストに追加（例: `-e +,.json,.vue`）。
   - そうでない場合は指定リストで上書き（例: `-e .py,.js`）。
-  - 省略時のデフォルト: `.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`, `.hpp`, `.ts`, `.tsx`, `.d.ts`, `.jsx`, `.toml`
+  - 省略時のデフォルト: `.txt`, `.md`, `.py`, `.js`, `.java`, `.cpp`, `.c`, `.cs`, `.rb`, `.go`, `.rs`, `.hpp`, `.ts`, `.tsx`, `.d.ts`, `.jsx`, `.toml`, `.msg`, `.srv`, `.action`, `.launch`, `.urdf`, `.xacro`, `.cfg`
   - **注意:** `.json` はデフォルトに含まれません。必要な場合は `-e +,.json` で追加してください。
   - **注意:** 拡張子なしファイル（例: `.gitignore`, `Makefile`, `Dockerfile`, `LICENSE`, `README`, `.gitattributes`, `justfile`）は明示的に除外しない限り許可されます。
 
@@ -73,6 +73,66 @@
 - `-w, --whitelist-filenames <FILENAMES>`
   - 常に含めるファイル名をカンマ区切りで指定（例: `Dockerfile,Makefile`）。デフォルト: `Dockerfile,Makefile,justfile`
 
+- `--config <CONFIG>`
+  - whitelist / blacklist を定義した TOML 設定ファイルを読み込みます。
+  - `--config` 指定時、フィルタ条件は **config 側に完全切替** されます。
+  - つまり `--extensions` / `--ignore-extensions` / `--ignore-dirs` / `--ignore-files` / `--whitelist-filenames` とは暗黙 merge されません。
+  - 一方で `-d, --directory`、`-o, --output`、`--max-size`、`-c, --clipboard` は通常どおり有効です。
+
+- `--generate-config`
+  - 現在のデフォルト設定相当の TOML を標準出力へ出力して終了します。
+  - このオプションは早期終了し、探索や出力ファイル書き込みは行いません。
+
+## TOML Configuration
+
+`--generate-config` でテンプレートを生成し、そのまま編集して `--config` に渡せます。
+
+```toml
+[whitelist]
+extensions = [".rs", ".py"]
+files = ["Dockerfile", "Makefile", "justfile"]
+
+[blacklist]
+extensions = [".png", ".jpg"]
+files = ["Cargo.lock"]
+directories = [".git", "target", "node_modules"]
+```
+
+各フィールドの意味:
+
+- `whitelist.extensions`
+  - 含める拡張子一覧です。
+  - `rs`, `.rs`, ` RS ` のような表記ゆれは内部で正規化され、同じ意味として扱われます。
+
+- `whitelist.files`
+  - 常に含めるファイル名一覧です。
+  - `blacklist.files` より優先されます。
+
+- `blacklist.extensions`
+  - 除外する拡張子一覧です。
+
+- `blacklist.files`
+  - 除外するファイル名一覧です。
+
+- `blacklist.directories`
+  - 再帰探索と tree 表示の両方から除外するディレクトリ名一覧です。
+
+### Precedence and Behavior
+
+- `--config` を指定した場合、フィルタ設定は TOML のみを使います。CLI のフィルタ系オプションとは混ざりません。
+- `whitelist.files` は `blacklist.files` より優先されます。
+- 拡張子なしファイルは、既定 CLI 出力との互換性を保つため、`Dockerfile`, `Makefile`, `LICENSE`, `README`, `.gitignore`, `.gitattributes`, `justfile` を既定で扱います。
+- `--generate-config` が出力する `whitelist.files` は `Dockerfile`, `Makefile`, `justfile` ですが、config 経路でも既定の extensionless 挙動は維持されます。
+
+### Error Behavior
+
+- 存在しない config パスを指定した場合:
+  - `Config file not found or unreadable: ...`
+- TOML 構文が不正な場合:
+  - `Config TOML parse error: ...`
+
+missing path と parse error は別メッセージで区別されます。
+
 ---
 
 ## Command and Output Examples
@@ -89,6 +149,18 @@
 
 # Cargo.lock, summary.txt_example というファイル名を無視してsummary.txtを生成
 ./target/release/oreuit --ignore-files Cargo.lock,summary.txt_example -o summary.txt
+
+# デフォルト相当の設定テンプレートを生成して保存
+./target/release/oreuit --generate-config > oreuit.toml
+
+# 生成した TOML を編集して適用
+./target/release/oreuit --config oreuit.toml -d . -o summary_from_config.txt
+
+# config 指定時でも出力先や対象ディレクトリは CLI で指定できる
+./target/release/oreuit --config oreuit.toml -d src,tests --max-size 2097152 -o summary_filtered.txt
+
+# 不正 TOML の挙動を確認
+./target/release/oreuit --config broken.toml -d .
 ```
 
 ---

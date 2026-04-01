@@ -1,5 +1,6 @@
 use clap::Parser;
 use encoding_rs::SHIFT_JIS;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::error::Error;
 use std::fs;
@@ -9,6 +10,41 @@ use std::path::{Path, PathBuf};
 extern crate lazy_static;
 
 use walkdir::WalkDir;
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+struct WhitelistConfig {
+    #[serde(default)]
+    extensions: Vec<String>,
+    #[serde(default)]
+    files: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+struct BlacklistConfig {
+    #[serde(default)]
+    extensions: Vec<String>,
+    #[serde(default)]
+    files: Vec<String>,
+    #[serde(default)]
+    directories: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Default)]
+struct Config {
+    #[serde(default)]
+    whitelist: WhitelistConfig,
+    #[serde(default)]
+    blacklist: BlacklistConfig,
+}
+
+struct FilterRules {
+    allowed: HashSet<String>,
+    ignore_exts: HashSet<String>,
+    ignore_dirs: HashSet<String>,
+    whitelist_filenames: HashSet<String>,
+    ignore_files: HashSet<String>,
+    extensionless_allowed: HashSet<String>,
+}
 
 /// Tool to summarize directory structure and file contents
 #[derive(Parser, Debug)]
@@ -64,287 +100,67 @@ struct Args {
         default_value = "Dockerfile,Makefile,justfile"
     )]
     whitelist_filenames: String,
+
+    /// Path to a TOML config file for whitelist/blacklist settings
+    #[clap(long = "config")]
+    config: Option<String>,
+
+    /// Generate a default config TOML and print to stdout, then exit
+    #[clap(long = "generate-config")]
+    generate_config: bool,
 }
 
-/// Determines if a file is binary by checking for NUL bytes in the first 1024 bytes
-fn is_binary(file_path: &Path) -> bool {
-    if let Ok(mut file) = fs::File::open(file_path) {
-        let mut buffer = [0u8; 1024];
-        if let Ok(n) = file.read(&mut buffer) {
-            return buffer[..n].iter().any(|&b| b == 0);
-        }
-    }
-    true
-}
-
-/// Attempts to read a file as UTF-8, and if it fails, tries to decode using SHIFT_JIS.
-/// If both attempts fail, returns "[Cannot decode file content]".
-fn read_file_contents(file_path: &Path) -> String {
-    match fs::read_to_string(file_path) {
-        Ok(text) => text,
-        Err(_) => match fs::read(file_path) {
-            Ok(bytes) => {
-                let (cow, _, had_errors) = SHIFT_JIS.decode(&bytes);
-                if had_errors {
-                    "[Cannot decode file content]".to_string()
-                } else {
-                    cow.into_owned()
-                }
-            }
-            Err(_) => "[Cannot decode file content]".to_string(),
-        },
+fn normalize_extension(value: &str) -> Option<String> {
+    let value = value.trim().to_lowercase();
+    if value.is_empty() {
+        None
+    } else if value.starts_with('.') {
+        Some(value)
+    } else {
+        Some(format!(".{}", value))
     }
 }
 
-/// Recursively searches the specified directory and lists files that
-/// - Match allowed extensions OR are whitelisted filenames
-/// - Do not have ignored extensions
-/// - Are not ignored filenames
-/// Files within ignored directories are not searched.
-fn collect_files(
-    directory: &Path,
-    allowed: &HashSet<String>,
-    ignore_exts: &HashSet<String>,
-    ignore_dirs: &HashSet<String>,
-    whitelist_filenames: &HashSet<String>,
-    ignore_files: &HashSet<String>,
-) -> Vec<PathBuf> {
-    let walker = WalkDir::new(directory).into_iter().filter_entry(|e| {
-        if e.file_type().is_dir() {
-            if let Some(name) = e.file_name().to_str() {
-                return !ignore_dirs.contains(&name.to_string());
-            }
-        }
-        true
-    });
-    let mut files = Vec::new();
-    for entry in walker.filter_map(|e| e.ok()) {
-        if entry.file_type().is_file() {
-            let path = entry.path();
-            let file_name_os = entry.file_name();
-            let file_name = file_name_os.to_string_lossy();
-            if whitelist_filenames.contains(file_name.as_ref()) {
-                files.push(path.to_path_buf());
-                continue;
-            }
-            if ignore_files.contains(file_name.as_ref()) {
-                continue;
-            }
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                let ext_formatted = format!(".{}", ext.to_lowercase());
-                if ignore_exts.contains(&ext_formatted) {
-                    continue;
-                }
-                if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
-                    continue;
-                }
-            } else {
-                let allowed_no_ext = [
-                    "Makefile",
-                    "Dockerfile",
-                    "LICENSE",
-                    "README",
-                    ".gitignore",
-                    ".gitattributes",
-                    "justfile",
-                ];
-                if !allowed.is_empty() && !allowed_no_ext.contains(&file_name.as_ref()) {
-                    continue;
-                }
-            }
-            files.push(path.to_path_buf());
-        }
-    }
-    files.sort();
-    files
+fn collect_normalized_extensions<I, S>(values: I) -> HashSet<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    values
+        .into_iter()
+        .filter_map(|value| normalize_extension(value.as_ref()))
+        .collect()
 }
 
-/// Generates a tree structure of the specified directory.
-fn build_tree(
-    directory: &Path,
-    allowed: &HashSet<String>,
-    ignore_exts: &HashSet<String>,
-    ignore_dirs: &HashSet<String>,
-    whitelist_filenames: &HashSet<String>,
-    ignore_files: &HashSet<String>,
-) -> String {
-    let base_name = match directory.file_name().and_then(|s| s.to_str()) {
-        Some(s) => s.to_string(),
-        None => directory.to_string_lossy().into_owned(),
-    };
-    let mut lines = vec![base_name];
-    build_tree_helper(
-        directory,
-        "",
-        allowed,
-        ignore_exts,
-        ignore_dirs,
+fn default_extensionless_filenames() -> HashSet<String> {
+    [
+        "Makefile",
+        "Dockerfile",
+        "LICENSE",
+        "README",
+        ".gitignore",
+        ".gitattributes",
+        "justfile",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+fn build_filter_rules_from_config(config: Config) -> FilterRules {
+    let whitelist_filenames: HashSet<String> = config.whitelist.files.into_iter().collect();
+
+    FilterRules {
+        allowed: collect_normalized_extensions(config.whitelist.extensions),
+        ignore_exts: collect_normalized_extensions(config.blacklist.extensions),
+        ignore_dirs: config.blacklist.directories.into_iter().collect(),
         whitelist_filenames,
-        ignore_files,
-        &mut lines,
-    );
-    lines.join("\n")
-}
-
-/// Helper function that recursively traverses the directory structure and builds the tree string
-fn build_tree_helper(
-    path: &Path,
-    prefix: &str,
-    allowed: &HashSet<String>,
-    ignore_exts: &HashSet<String>,
-    ignore_dirs: &HashSet<String>,
-    whitelist_filenames: &HashSet<String>,
-    ignore_files: &HashSet<String>,
-    lines: &mut Vec<String>,
-) {
-    let mut entries: Vec<fs::DirEntry> = match fs::read_dir(path) {
-        Ok(iter) => iter.filter_map(|e| e.ok()).collect(),
-        Err(_) => return,
-    };
-    entries.sort_by_key(|e| e.file_name());
-    let mut filtered_entries = Vec::new();
-    for entry in entries {
-        let entry_path = entry.path();
-        let file_name_os = entry.file_name();
-        let name_buf = file_name_os.to_string_lossy().to_string();
-        let name = &name_buf;
-        if entry_path.is_dir() {
-            if ignore_dirs.contains(name) {
-                continue;
-            }
-            filtered_entries.push((entry, true));
-        } else if entry_path.is_file() {
-            if whitelist_filenames.contains(name) {
-                filtered_entries.push((entry, false));
-                continue;
-            }
-            if ignore_files.contains(name) {
-                continue;
-            }
-            if let Some(ext) = entry_path.extension().and_then(|e| e.to_str()) {
-                let ext_formatted = format!(".{}", ext.to_lowercase());
-                if ignore_exts.contains(&ext_formatted) {
-                    continue;
-                }
-                if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
-                    continue;
-                }
-            } else {
-                let allowed_no_ext = [
-                    "Makefile",
-                    "Dockerfile",
-                    "LICENSE",
-                    "README",
-                    ".gitignore",
-                    ".gitattributes",
-                    "justfile",
-                ];
-                if !allowed.is_empty() && !allowed_no_ext.contains(&name.as_ref()) {
-                    continue;
-                }
-            }
-            filtered_entries.push((entry, false));
-        }
-    }
-    let count = filtered_entries.len();
-    for (i, (entry, is_dir)) in filtered_entries.into_iter().enumerate() {
-        let is_last = i == count - 1;
-        let connector = if is_last { "└── " } else { "├── " };
-        let name_buf = entry.file_name().to_string_lossy().to_string();
-        let name = &name_buf;
-        lines.push(format!("{}{}{}", prefix, connector, name));
-        if is_dir {
-            let new_prefix = if is_last {
-                format!("{}    ", prefix)
-            } else {
-                format!("{}│   ", prefix)
-            };
-            build_tree_helper(
-                &entry.path(),
-                &new_prefix,
-                allowed,
-                ignore_exts,
-                ignore_dirs,
-                whitelist_filenames,
-                ignore_files,
-                lines,
-            );
-        }
+        ignore_files: config.blacklist.files.into_iter().collect(),
+        extensionless_allowed: default_extensionless_filenames(),
     }
 }
 
-lazy_static! {
-    static ref DEFAULT_ALLOWED_EXTENSIONS: HashSet<String> = [
-        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp",
-        ".ts", ".tsx", ".d.ts", ".jsx", ".toml",
-        ".msg", ".srv", ".action", ".launch", ".urdf", ".xacro", ".cfg",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-    static ref DEFAULT_IGNORE_DIRS: HashSet<String> = [
-        ".git",
-        ".vscode",
-        "target",
-        "node_modules",
-        "__pycache__",
-        ".idea",
-        "build",
-        "dist",
-        ".ruff_cache",
-        ".cache",
-        ".tox",
-        ".nox",
-        ".pytest_cache",
-        "htmlcov",
-        "instance",
-        ".env",
-        ".venv",
-        "env",
-        "venv",
-        "ENV",
-        "site",
-        ".mypy_cache",
-        "debug",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-}
-
-fn main() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
-
-    let directories: Vec<PathBuf> = args
-        .directories
-        .split(',')
-        .filter_map(|s| {
-            let s = s.trim();
-            if s.is_empty() {
-                None
-            } else {
-                let path = PathBuf::from(s);
-                if !path.exists() {
-                    eprintln!("Warning: Directory not found, skipping: {}", path.display());
-                    None
-                } else if !path.is_dir() {
-                    eprintln!(
-                        "Warning: Path is not a directory, skipping: {}",
-                        path.display()
-                    );
-                    None
-                } else {
-                    Some(path)
-                }
-            }
-        })
-        .collect();
-
-    if directories.is_empty() {
-        eprintln!("Error: No valid directories specified or found.");
-        return Ok(());
-    }
-
+fn build_filter_rules_from_cli(args: &Args) -> FilterRules {
     let allowed: HashSet<String> = match &args.extensions {
         None => DEFAULT_ALLOWED_EXTENSIONS.clone(),
         Some(val) => {
@@ -354,48 +170,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             } else if val.starts_with("+,") {
                 let mut set = DEFAULT_ALLOWED_EXTENSIONS.clone();
                 for s in val.trim_start_matches("+,").split(',') {
-                    let s = s.trim().to_lowercase();
-                    if s.is_empty() {
-                        continue;
-                    }
-                    if s.starts_with('.') {
-                        set.insert(s);
-                    } else {
-                        set.insert(format!(".{}", s));
+                    if let Some(ext) = normalize_extension(s) {
+                        set.insert(ext);
                     }
                 }
                 set
             } else {
-                val.split(',')
-                    .filter_map(|s| {
-                        let s = s.trim().to_lowercase();
-                        if s.is_empty() {
-                            None
-                        } else if s.starts_with('.') {
-                            Some(s)
-                        } else {
-                            Some(format!(".{}", s))
-                        }
-                    })
-                    .collect()
+                collect_normalized_extensions(val.split(','))
             }
         }
     };
-
-    let ignore_exts: HashSet<String> = args
-        .ignore_extensions
-        .split(',')
-        .filter_map(|s| {
-            let s = s.trim().to_lowercase();
-            if s.is_empty() {
-                None
-            } else if s.starts_with('.') {
-                Some(s)
-            } else {
-                Some(format!(".{}", s))
-            }
-        })
-        .collect();
 
     let ignore_dirs: HashSet<String> = match &args.ignore_dirs {
         None => DEFAULT_IGNORE_DIRS.clone(),
@@ -454,6 +238,335 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
+    FilterRules {
+        allowed,
+        ignore_exts: collect_normalized_extensions(args.ignore_extensions.split(',')),
+        ignore_dirs,
+        whitelist_filenames,
+        ignore_files,
+        extensionless_allowed: default_extensionless_filenames(),
+    }
+}
+
+/// Determines if a file is binary by checking for NUL bytes in the first 1024 bytes
+fn is_binary(file_path: &Path) -> bool {
+    if let Ok(mut file) = fs::File::open(file_path) {
+        let mut buffer = [0u8; 1024];
+        if let Ok(n) = file.read(&mut buffer) {
+            return buffer[..n].contains(&0);
+        }
+    }
+    true
+}
+
+/// Attempts to read a file as UTF-8, and if it fails, tries to decode using SHIFT_JIS.
+/// If both attempts fail, returns "[Cannot decode file content]".
+fn read_file_contents(file_path: &Path) -> String {
+    match fs::read_to_string(file_path) {
+        Ok(text) => text,
+        Err(_) => match fs::read(file_path) {
+            Ok(bytes) => {
+                let (cow, _, had_errors) = SHIFT_JIS.decode(&bytes);
+                if had_errors {
+                    "[Cannot decode file content]".to_string()
+                } else {
+                    cow.into_owned()
+                }
+            }
+            Err(_) => "[Cannot decode file content]".to_string(),
+        },
+    }
+}
+
+/// Recursively searches the specified directory and lists files that
+/// - Match allowed extensions OR are whitelisted filenames
+/// - Do not have ignored extensions
+/// - Are not ignored filenames
+///
+/// Files within ignored directories are not searched.
+fn collect_files(
+    directory: &Path,
+    allowed: &HashSet<String>,
+    ignore_exts: &HashSet<String>,
+    ignore_dirs: &HashSet<String>,
+    whitelist_filenames: &HashSet<String>,
+    ignore_files: &HashSet<String>,
+    extensionless_allowed: &HashSet<String>,
+) -> Vec<PathBuf> {
+    let walker = WalkDir::new(directory).into_iter().filter_entry(|e| {
+        if e.file_type().is_dir() {
+            if let Some(name) = e.file_name().to_str() {
+                return !ignore_dirs.contains(&name.to_string());
+            }
+        }
+        true
+    });
+    let mut files = Vec::new();
+    for entry in walker.filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            let path = entry.path();
+            let file_name_os = entry.file_name();
+            let file_name = file_name_os.to_string_lossy();
+            if whitelist_filenames.contains(file_name.as_ref()) {
+                files.push(path.to_path_buf());
+                continue;
+            }
+            if ignore_files.contains(file_name.as_ref()) {
+                continue;
+            }
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                let Some(ext_formatted) = normalize_extension(ext) else {
+                    continue;
+                };
+                if ignore_exts.contains(&ext_formatted) {
+                    continue;
+                }
+                if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
+                    continue;
+                }
+            } else if !allowed.is_empty() && !extensionless_allowed.contains(file_name.as_ref()) {
+                continue;
+            }
+            files.push(path.to_path_buf());
+        }
+    }
+    files.sort();
+    files
+}
+
+/// Generates a tree structure of the specified directory.
+fn build_tree(
+    directory: &Path,
+    allowed: &HashSet<String>,
+    ignore_exts: &HashSet<String>,
+    ignore_dirs: &HashSet<String>,
+    whitelist_filenames: &HashSet<String>,
+    ignore_files: &HashSet<String>,
+    extensionless_allowed: &HashSet<String>,
+) -> String {
+    let base_name = match directory.file_name().and_then(|s| s.to_str()) {
+        Some(s) => s.to_string(),
+        None => directory.to_string_lossy().into_owned(),
+    };
+    let mut lines = vec![base_name];
+    build_tree_helper(
+        directory,
+        "",
+        allowed,
+        ignore_exts,
+        ignore_dirs,
+        whitelist_filenames,
+        ignore_files,
+        extensionless_allowed,
+        &mut lines,
+    );
+    lines.join("\n")
+}
+
+/// Helper function that recursively traverses the directory structure and builds the tree string
+#[allow(clippy::too_many_arguments)]
+fn build_tree_helper(
+    path: &Path,
+    prefix: &str,
+    allowed: &HashSet<String>,
+    ignore_exts: &HashSet<String>,
+    ignore_dirs: &HashSet<String>,
+    whitelist_filenames: &HashSet<String>,
+    ignore_files: &HashSet<String>,
+    extensionless_allowed: &HashSet<String>,
+    lines: &mut Vec<String>,
+) {
+    let mut entries: Vec<fs::DirEntry> = match fs::read_dir(path) {
+        Ok(iter) => iter.filter_map(|e| e.ok()).collect(),
+        Err(_) => return,
+    };
+    entries.sort_by_key(|e| e.file_name());
+    let mut filtered_entries = Vec::new();
+    for entry in entries {
+        let entry_path = entry.path();
+        let file_name_os = entry.file_name();
+        let name_buf = file_name_os.to_string_lossy().to_string();
+        let name = &name_buf;
+        if entry_path.is_dir() {
+            if ignore_dirs.contains(name) {
+                continue;
+            }
+            filtered_entries.push((entry, true));
+        } else if entry_path.is_file() {
+            if whitelist_filenames.contains(name) {
+                filtered_entries.push((entry, false));
+                continue;
+            }
+            if ignore_files.contains(name) {
+                continue;
+            }
+            if let Some(ext) = entry_path.extension().and_then(|e| e.to_str()) {
+                let Some(ext_formatted) = normalize_extension(ext) else {
+                    continue;
+                };
+                if ignore_exts.contains(&ext_formatted) {
+                    continue;
+                }
+                if !allowed.is_empty() && !allowed.contains(&ext_formatted) {
+                    continue;
+                }
+            } else if !allowed.is_empty() && !extensionless_allowed.contains(name.as_str()) {
+                continue;
+            }
+            filtered_entries.push((entry, false));
+        }
+    }
+    let count = filtered_entries.len();
+    for (i, (entry, is_dir)) in filtered_entries.into_iter().enumerate() {
+        let is_last = i == count - 1;
+        let connector = if is_last { "└── " } else { "├── " };
+        let name_buf = entry.file_name().to_string_lossy().to_string();
+        let name = &name_buf;
+        lines.push(format!("{}{}{}", prefix, connector, name));
+        if is_dir {
+            let new_prefix = if is_last {
+                format!("{}    ", prefix)
+            } else {
+                format!("{}│   ", prefix)
+            };
+            build_tree_helper(
+                &entry.path(),
+                &new_prefix,
+                allowed,
+                ignore_exts,
+                ignore_dirs,
+                whitelist_filenames,
+                ignore_files,
+                extensionless_allowed,
+                lines,
+            );
+        }
+    }
+}
+
+lazy_static! {
+    static ref DEFAULT_ALLOWED_EXTENSIONS: HashSet<String> = [
+        ".txt", ".md", ".py", ".js", ".java", ".cpp", ".c", ".cs", ".rb", ".go", ".rs", ".hpp",
+        ".ts", ".tsx", ".d.ts", ".jsx", ".toml", ".msg", ".srv", ".action", ".launch", ".urdf",
+        ".xacro", ".cfg",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    static ref DEFAULT_IGNORE_DIRS: HashSet<String> = [
+        ".git",
+        ".vscode",
+        "target",
+        "node_modules",
+        "__pycache__",
+        ".idea",
+        "build",
+        "dist",
+        ".ruff_cache",
+        ".cache",
+        ".tox",
+        ".nox",
+        ".pytest_cache",
+        "htmlcov",
+        "instance",
+        ".env",
+        ".venv",
+        "env",
+        "venv",
+        "ENV",
+        "site",
+        ".mypy_cache",
+        "debug",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+}
+
+impl Config {
+    fn from_defaults() -> Self {
+        Config {
+            whitelist: WhitelistConfig {
+                extensions: DEFAULT_ALLOWED_EXTENSIONS.iter().cloned().collect(),
+                files: vec![
+                    "Dockerfile".to_string(),
+                    "Makefile".to_string(),
+                    "justfile".to_string(),
+                ],
+            },
+            blacklist: BlacklistConfig {
+                extensions: vec![
+                    ".bin", ".zip", ".tar", ".gz", ".7z", ".rar", ".exe", ".dll", ".so", ".dylib",
+                    ".a", ".lib", ".obj", ".o", ".class", ".jar", ".war", ".ear", ".ipynb", ".jpg",
+                    ".jpeg", ".png", ".gif",
+                ]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+                files: vec![],
+                directories: DEFAULT_IGNORE_DIRS.iter().cloned().collect(),
+            },
+        }
+    }
+
+    fn from_file(path: &str) -> Result<Self, Box<dyn Error>> {
+        let content = fs::read_to_string(path)
+            .map_err(|e| format!("Config file not found or unreadable: {}", e))?;
+        let config: Config =
+            toml::from_str(&content).map_err(|e| format!("Config TOML parse error: {}", e))?;
+        Ok(config)
+    }
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let args = Args::parse();
+
+    if args.generate_config {
+        let default_config = Config::from_defaults();
+        let toml_str =
+            toml::to_string_pretty(&default_config).expect("Failed to serialize default config");
+        println!("{}", toml_str);
+        return Ok(());
+    }
+
+    let directories: Vec<PathBuf> = args
+        .directories
+        .split(',')
+        .filter_map(|s| {
+            let s = s.trim();
+            if s.is_empty() {
+                None
+            } else {
+                let path = PathBuf::from(s);
+                if !path.exists() {
+                    eprintln!("Warning: Directory not found, skipping: {}", path.display());
+                    None
+                } else if !path.is_dir() {
+                    eprintln!(
+                        "Warning: Path is not a directory, skipping: {}",
+                        path.display()
+                    );
+                    None
+                } else {
+                    Some(path)
+                }
+            }
+        })
+        .collect();
+
+    if directories.is_empty() {
+        eprintln!("Error: No valid directories specified or found.");
+        return Ok(());
+    }
+
+    let filters = if let Some(config_path) = &args.config {
+        let config = Config::from_file(config_path)
+            .map_err(|e| format!("Failed to load config file '{}': {}", config_path, e))?;
+        build_filter_rules_from_config(config)
+    } else {
+        build_filter_rules_from_cli(&args)
+    };
+
     let mut all_tree_text = String::new();
     let mut all_file_contents = String::new();
 
@@ -465,11 +578,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let tree_text = build_tree(
             dir,
-            &allowed,
-            &ignore_exts,
-            &ignore_dirs,
-            &whitelist_filenames,
-            &ignore_files,
+            &filters.allowed,
+            &filters.ignore_exts,
+            &filters.ignore_dirs,
+            &filters.whitelist_filenames,
+            &filters.ignore_files,
+            &filters.extensionless_allowed,
         );
 
         all_tree_text.push_str(&format!(
@@ -479,11 +593,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let files = collect_files(
             dir,
-            &allowed,
-            &ignore_exts,
-            &ignore_dirs,
-            &whitelist_filenames,
-            &ignore_files,
+            &filters.allowed,
+            &filters.ignore_exts,
+            &filters.ignore_dirs,
+            &filters.whitelist_filenames,
+            &filters.ignore_files,
+            &filters.extensionless_allowed,
         );
 
         for file in files {
@@ -547,4 +662,130 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Output completed: {}", args.output);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+    use std::process;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestTempDir {
+        path: PathBuf,
+    }
+
+    impl TestTempDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path =
+                env::temp_dir().join(format!("oreuit_{}_{}_{}", name, process::id(), unique));
+            fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+
+        fn write_file(&self, relative: &str, content: &str) -> PathBuf {
+            let path = self.path.join(relative);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&path, content).unwrap();
+            path
+        }
+    }
+
+    impl Drop for TestTempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn config_loads_valid_toml() {
+        let temp_dir = TestTempDir::new("valid_toml");
+        let config_path = temp_dir.write_file(
+            "oreuit.toml",
+            r#"
+[whitelist]
+extensions = [".rs", "py"]
+files = ["Dockerfile"]
+
+[blacklist]
+extensions = [".png"]
+files = ["Cargo.lock"]
+directories = ["target"]
+"#,
+        );
+
+        let config = Config::from_file(config_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(config.whitelist.extensions, vec![".rs", "py"]);
+        assert_eq!(config.whitelist.files, vec!["Dockerfile"]);
+        assert_eq!(config.blacklist.extensions, vec![".png"]);
+        assert_eq!(config.blacklist.files, vec!["Cargo.lock"]);
+        assert_eq!(config.blacklist.directories, vec!["target"]);
+    }
+
+    #[test]
+    fn config_errors_on_missing_file() {
+        let temp_dir = TestTempDir::new("missing_config");
+        let missing_path = temp_dir.path.join("does_not_exist.toml");
+
+        let err = Config::from_file(missing_path.to_str().unwrap()).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("Config file not found or unreadable"));
+    }
+
+    #[test]
+    fn config_errors_on_invalid_toml() {
+        let temp_dir = TestTempDir::new("invalid_toml");
+        let config_path = temp_dir.write_file(
+            "broken.toml",
+            r#"
+[whitelist
+extensions = [".rs"]
+"#,
+        );
+
+        let err = Config::from_file(config_path.to_str().unwrap()).unwrap_err();
+
+        assert!(err.to_string().contains("Config TOML parse error"));
+    }
+
+    #[test]
+    fn extensions_are_normalized() {
+        assert_eq!(normalize_extension(".rs"), Some(".rs".to_string()));
+        assert_eq!(normalize_extension("rs"), Some(".rs".to_string()));
+        assert_eq!(normalize_extension(" RS "), Some(".rs".to_string()));
+
+        let normalized = collect_normalized_extensions([".rs", "rs", " RS ", ".PY", " py "]);
+
+        assert!(normalized.contains(".rs"));
+        assert!(normalized.contains(".py"));
+        assert_eq!(normalized.len(), 2);
+    }
+
+    #[test]
+    fn whitelist_filename_overrides_blacklist_file() {
+        let temp_dir = TestTempDir::new("whitelist_overrides_blacklist");
+        let target_file = temp_dir.write_file("config.toml", "name = 'oreuit'\n");
+
+        let files = collect_files(
+            &temp_dir.path,
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::from(["config.toml".to_string()]),
+            &HashSet::from(["config.toml".to_string()]),
+            &HashSet::new(),
+        );
+
+        assert_eq!(files, vec![target_file]);
+    }
 }
