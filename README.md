@@ -13,8 +13,8 @@
 
 1.  **リポジトリのクローンまたはコードの取得**
     ```bash
-    git clone https://github.com/yuki-inaho/uithub_like_text_generator.git
-    cd uithub_like_text_generator
+    git clone https://github.com/yuki-inaho/oreuit.git
+    cd oreuit
     ```
 2.  **ビルド**
     ```bash
@@ -160,11 +160,11 @@ directories = [".git", "target", "node_modules"]
 ### Error Behavior
 
 - 存在しない config パスを指定した場合:
-  - `Config file not found or unreadable: ...`
+  - `Failed to load config file '/path/to/config.toml': Config file not found or unreadable: ...`
 - TOML 構文が不正な場合:
-  - `Config TOML parse error: ...`
+  - `Failed to load config file '/path/to/config.toml': Config TOML parse error: ...`
 
-missing path と parse error は別メッセージで区別されます。
+どちらも先頭に `Failed to load config file '...'` が付き、その後ろの理由で missing path と parse error が区別されます。
 
 ---
 

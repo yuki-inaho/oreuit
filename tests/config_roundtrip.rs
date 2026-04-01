@@ -57,6 +57,21 @@ fn generate_default_config(path: &Path) {
     fs::write(path, output.stdout).unwrap();
 }
 
+fn generate_default_config_stdout() -> String {
+    let output = Command::new(oreuit_bin())
+        .arg("--generate-config")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "generate-config failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8(output.stdout).unwrap()
+}
+
 #[test]
 fn generate_config_round_trips() {
     let temp_dir = TestTempDir::new("generate_config_round_trips");
@@ -123,4 +138,12 @@ fn config_mode_matches_default_output() {
     let config_summary = fs::read_to_string(&config_output_path).unwrap();
 
     assert_eq!(default_summary, config_summary);
+}
+
+#[test]
+fn generate_config_is_stable_across_runs() {
+    let first = generate_default_config_stdout();
+    let second = generate_default_config_stdout();
+
+    assert_eq!(first, second);
 }

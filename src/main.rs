@@ -252,6 +252,12 @@ fn default_extensionless_filenames() -> HashSet<String> {
     .collect()
 }
 
+fn sorted_strings(values: &HashSet<String>) -> Vec<String> {
+    let mut items: Vec<String> = values.iter().cloned().collect();
+    items.sort_unstable();
+    items
+}
+
 fn build_filter_rules_from_config(config: Config) -> FilterRules {
     let whitelist_filenames: HashSet<String> = config.whitelist.files.into_iter().collect();
 
@@ -592,7 +598,7 @@ impl Config {
     fn from_defaults() -> Self {
         Config {
             whitelist: WhitelistConfig {
-                extensions: DEFAULT_ALLOWED_EXTENSIONS.iter().cloned().collect(),
+                extensions: sorted_strings(&DEFAULT_ALLOWED_EXTENSIONS),
                 files: vec![
                     "Dockerfile".to_string(),
                     "Makefile".to_string(),
@@ -609,7 +615,7 @@ impl Config {
                 .map(|s| s.to_string())
                 .collect(),
                 files: vec![],
-                directories: DEFAULT_IGNORE_DIRS.iter().cloned().collect(),
+                directories: sorted_strings(&DEFAULT_IGNORE_DIRS),
             },
         }
     }
