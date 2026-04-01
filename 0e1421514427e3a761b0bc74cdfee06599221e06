@@ -1,0 +1,11 @@
+Validated with:
+- cargo test
+- cargo build --release
+- git diff --check
+
+Release binary refreshed at /home/inaho-omen/local/bin/oreuit from target/release/oreuit.
+
+Sample output regenerated and verified with:
+- cargo run -- -d . -I +,temp,.serena --ignore-files summary.txt_example,.codex -o summary.txt_example
+- cargo run -- -d . -I +,temp,.serena --ignore-files summary.txt_example,.codex -o /tmp/summary_check.txt
+- diff -u summary.txt_example /tmp/summary_check.txt
